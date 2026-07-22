@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { getDownloadUrl, getPreview } from '../services/api';
 import type { PreviewSegment, TranslationJob } from '../types';
-import { statusLabel } from '../utils/format';
+import { formatPreviewText, statusLabel } from '../utils/format';
 
 interface Props {
   job: TranslationJob;
@@ -31,8 +31,8 @@ export function PreviewTable({ job }: Props) {
         rows = rows.filter(
           (s) =>
             s.segmentId.toLowerCase().includes(needle) ||
-            s.original.toLowerCase().includes(needle) ||
-            s.translation.toLowerCase().includes(needle),
+            formatPreviewText(s.original).toLowerCase().includes(needle) ||
+            formatPreviewText(s.translation).toLowerCase().includes(needle),
         );
       }
       setTotal(rows.length);
@@ -119,8 +119,12 @@ export function PreviewTable({ job }: Props) {
                   <td className="px-3 py-3 font-mono text-xs text-[var(--color-brand)]">
                     {seg.segmentId}
                   </td>
-                  <td className="max-w-xs px-3 py-3 text-[var(--color-ink)]">{seg.original}</td>
-                  <td className="max-w-xs px-3 py-3 text-[var(--color-ink)]">{seg.translation || '—'}</td>
+                  <td className="max-w-xs px-3 py-3 text-[var(--color-ink)]">
+                    {formatPreviewText(seg.original) || '—'}
+                  </td>
+                  <td className="max-w-xs px-3 py-3 text-[var(--color-ink)]">
+                    {formatPreviewText(seg.translation) || '—'}
+                  </td>
                   <td className="px-3 py-3">
                     <StatusPill status={seg.validationStatus || seg.status} />
                   </td>

@@ -38,6 +38,31 @@ export function statusLabel(status: string): string {
   return map[status] ?? status;
 }
 
+export function formatPreviewText(value: string | null | undefined): string {
+  if (!value) return '';
+
+  const decoded = value
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;|&apos;/g, "'")
+    .replace(/&#(x[\da-f]+|\d+);/gi, (_, code: string) => {
+      const number = code.toLowerCase().startsWith('x')
+        ? Number.parseInt(code.slice(1), 16)
+        : Number.parseInt(code, 10);
+      return Number.isInteger(number) && number >= 0 && number <= 0x10ffff
+        ? String.fromCodePoint(number)
+        : '';
+    })
+    .replace(/&amp;/g, '&');
+
+  return decoded
+    .replace(/<[^>]*>/g, '')
+    .replace(/\s+/g, ' ')
+    .replace(/-\s+/g, '-')
+    .trim();
+}
+
 export function isAcceptedXliff(file: File): boolean {
   const name = file.name.toLowerCase();
   return name.endsWith('.xlf') || name.endsWith('.xliff');
