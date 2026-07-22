@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff version="1.2" xmlns="urn:oasis:names:tc:xliff:document:1.2">
+  <file source-language="en" target-language="en" datatype="plaintext" original="voice_script.tts">
+    <header>
+      <tool tool-id="demo" tool-name="XLIFF AI Translator Sample"/>
+    </header>
+    <body>
+      <trans-unit id="1">
+        <source>Hello</source>
+        <target>Hello</target>
+      </trans-unit>
+      <trans-unit id="2">
+        <source>Welcome to our platform</source>
+      </trans-unit>
+      <trans-unit id="3">
+        <source>Hello <ph id="1">{username}</ph></source>
+      </trans-unit>
+      <trans-unit id="4">
+        <source>Your code is %CODE% and expires in {{minutes}} minutes.</source>
+      </trans-unit>
+      <trans-unit id="5">
+        <source>Please visit https://example.com/help for support.</source>
+      </trans-unit>
+      <trans-unit id="6">
+        <source>Press <g id="btn">Continue</g> when you are ready.</source>
+      </trans-unit>
+    </body>
+  </file>
+</xliff>

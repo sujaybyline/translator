@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff version="2.0" xmlns="urn:oasis:names:tc:xliff:document:2.0" srcLang="en" trgLang="en">
+  <file id="f1" original="voice_script_v2.tts">
+    <unit id="u1">
+      <segment id="s1">
+        <source>Good morning</source>
+        <target>Good morning</target>
+      </segment>
+    </unit>
+    <unit id="u2">
+      <segment id="s2">
+        <source>Hello <ph id="1">{username}</ph>, your order <ph id="2">{orderId}</ph> is ready.</source>
+      </segment>
+    </unit>
+    <unit id="u3">
+      <segment id="s3">
+        <source>Tap {{action}} to confirm</source>
+      </segment>
+    </unit>
+  </file>
+</xliff>

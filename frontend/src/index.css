@@ -1,0 +1,43 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "DM Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Instrument Serif", Georgia, serif;
+  --color-ink: #0c1f1f;
+  --color-ink-soft: #3d5555;
+  --color-paper: #f4f7f4;
+  --color-paper-2: #e8efe9;
+  --color-brand: #0f3d3e;
+  --color-brand-light: #1a5c5e;
+  --color-accent: #c4a35a;
+  --color-accent-soft: #e8d9a8;
+  --color-line: #c5d4c6;
+  --color-ok: #1f7a4d;
+  --color-warn: #9a6b1a;
+  --color-danger: #a33b3b;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  color: var(--color-ink);
+  background:
+    radial-gradient(ellipse 80% 50% at 10% -10%, #dce8dd 0%, transparent 55%),
+    radial-gradient(ellipse 60% 40% at 100% 0%, #e8d9a833 0%, transparent 45%),
+    linear-gradient(180deg, #f7faf7 0%, var(--color-paper) 40%, #eef3ee 100%);
+  background-attachment: fixed;
+}
+
+::selection {
+  background: color-mix(in oklab, var(--color-accent) 45%, white);
+}
