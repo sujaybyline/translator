@@ -29,6 +29,11 @@ export async function startTranslation(jobId: string): Promise<TranslationJob> {
   return parseJson<TranslationJob>(res);
 }
 
+export async function clearJob(jobId: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/translate/${jobId}`, { method: 'DELETE' });
+  await parseJson<null>(res);
+}
+
 export async function getJob(jobId: string): Promise<TranslationJob> {
   const res = await fetch(`${API_BASE}/translate/${jobId}`);
   return parseJson<TranslationJob>(res);

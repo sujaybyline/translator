@@ -127,6 +127,11 @@ export async function updateJob(
   await pool.execute(`UPDATE translation_jobs SET ${sets.join(', ')} WHERE id = :id`, params);
 }
 
+export async function deleteJob(id: string): Promise<void> {
+  if (!dbAvailable || !pool) return;
+  await pool.execute('DELETE FROM translation_jobs WHERE id = :id', { id });
+}
+
 export async function getJobById(id: string): Promise<TranslationJobRecord | null> {
   if (!dbAvailable || !pool) return null;
   const [rows] = await pool.execute<RowDataPacket[]>(

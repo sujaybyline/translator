@@ -83,8 +83,19 @@ function parseGeminiJson(raw: string): Array<{ id: string; text: string }> {
   throw new Error('Failed to parse Gemini translation response as JSON.');
 }
 
-async function sleep(ms: number): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, ms));
+async function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) throw new Error('Translation cancelled.');
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(resolve, ms);
+    signal?.addEventListener(
+      'abort',
+      () => {
+        clearTimeout(timer);
+        reject(new Error('Translation cancelled.'));
+      },
+      { once: true },
+    );
+  });
 }
 
 function errorMessage(err: unknown): string {
@@ -113,12 +124,14 @@ function userFacingError(err: unknown): string {
 export class GeminiTranslator {
   private genAI: GoogleGenerativeAI;
   private models: string[];
+  private signal?: AbortSignal;
 
-  constructor() {
+  constructor(signal?: AbortSignal) {
     assertGeminiConfigured();
     this.genAI = new GoogleGenerativeAI(config.geminiApiKey);
     const primary = config.geminiModel;
     this.models = [primary, ...MODEL_FALLBACKS.filter((m) => m !== primary)];
+    this.signal = signal;
   }
 
   private getModel(modelName: string) {
@@ -137,18 +150,21 @@ export class GeminiTranslator {
     for (const modelName of this.models) {
       for (let attempt = 1; attempt <= config.maxRetries; attempt++) {
         try {
-          const result = await this.getModel(modelName).generateContent(prompt);
+          const result = await this.getModel(modelName).generateContent(prompt, {
+            signal: this.signal,
+          });
           return result.response.text();
         } catch (err) {
           lastError = err;
           console.warn(`[gemini] ${modelName} attempt ${attempt}:`, errorMessage(err).slice(0, 120));
 
+          if (this.signal?.aborted) throw new Error('Translation cancelled.');
           if (isRateLimitError(err)) {
-            await sleep(Math.min(60_000, 2000 * attempt * attempt));
+            await sleep(Math.min(60_000, 2000 * attempt * attempt), this.signal);
             continue;
           }
           if (attempt < config.maxRetries) {
-            await sleep(800 * attempt);
+            await sleep(800 * attempt, this.signal);
             continue;
           }
           break; // try next model
@@ -191,8 +207,9 @@ export class GeminiTranslator {
       const raw = await this.callModel(buildPrompt(items, targetLanguageName, false));
       translations = parseGeminiJson(raw);
     } catch (err) {
+      if (this.signal?.aborted) throw new Error('Translation cancelled.');
       try {
-        await sleep(3000);
+        await sleep(3000, this.signal);
         const raw = await this.callModel(buildPrompt(items.slice(0, 5), targetLanguageName, true));
         translations = parseGeminiJson(raw);
         if (items.length > 5) {
