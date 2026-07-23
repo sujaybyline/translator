@@ -1,10 +1,10 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { UploadZone } from '../components/UploadZone';
 import { FileMetaCard } from '../components/FileMetaCard';
 import { ProgressPanel } from '../components/ProgressPanel';
 import { CompletionCard, PreviewTable } from '../components/PreviewTable';
 import { useJobPolling } from '../hooks/useJobPolling';
-import { clearJob, startTranslation, uploadXliff } from '../services/api';
+import { clearJob, getHistory, startTranslation, uploadXliff } from '../services/api';
 import type { TranslationJob } from '../types';
 
 export function TranslatorPage() {
@@ -14,12 +14,33 @@ export function TranslatorPage() {
   const [starting, setStarting] = useState(false);
   const [clearing, setClearing] = useState(false);
   const startInFlight = useRef(false);
+  const jobSelectionChanged = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const { job: polledJob } = useJobPolling(jobId);
 
   const job = polledJob ?? localJob;
 
+  useEffect(() => {
+    let cancelled = false;
+
+    void getHistory()
+      .then((jobs) => {
+        if (cancelled || jobSelectionChanged.current || jobs.length === 0) return;
+        const latest = jobs[0];
+        setLocalJob(latest);
+        setJobId(latest.id);
+      })
+      .catch(() => {
+        // Upload failures are shown when the user uploads a file.
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const onFile = async (file: File) => {
+    jobSelectionChanged.current = true;
     setError(null);
     setUploading(true);
     setStarting(false);
@@ -40,6 +61,7 @@ export function TranslatorPage() {
 
   const onClear = async () => {
     if (!job || startInFlight.current || clearing) return;
+    jobSelectionChanged.current = true;
     setClearing(true);
     setError(null);
     try {
@@ -55,6 +77,7 @@ export function TranslatorPage() {
 
   const onStart = async () => {
     if (!job || startInFlight.current) return;
+    jobSelectionChanged.current = true;
     startInFlight.current = true;
     setStarting(true);
     setError(null);
