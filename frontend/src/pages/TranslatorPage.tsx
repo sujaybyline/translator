@@ -1,10 +1,10 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { UploadZone } from '../components/UploadZone';
 import { FileMetaCard } from '../components/FileMetaCard';
 import { ProgressPanel } from '../components/ProgressPanel';
 import { CompletionCard, PreviewTable } from '../components/PreviewTable';
 import { useJobPolling } from '../hooks/useJobPolling';
-import { startTranslation, uploadXliff } from '../services/api';
+import { clearJob, startTranslation, uploadXliff } from '../services/api';
 import type { TranslationJob } from '../types';
 
 export function TranslatorPage() {
@@ -12,6 +12,8 @@ export function TranslatorPage() {
   const [localJob, setLocalJob] = useState<TranslationJob | null>(null);
   const [uploading, setUploading] = useState(false);
   const [starting, setStarting] = useState(false);
+  const [clearing, setClearing] = useState(false);
+  const startInFlight = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const { job: polledJob } = useJobPolling(jobId);
 
@@ -20,6 +22,9 @@ export function TranslatorPage() {
   const onFile = async (file: File) => {
     setError(null);
     setUploading(true);
+    setStarting(false);
+    setClearing(false);
+    startInFlight.current = false;
     setJobId(null);
     setLocalJob(null);
     try {
@@ -33,8 +38,24 @@ export function TranslatorPage() {
     }
   };
 
+  const onClear = async () => {
+    if (!job || startInFlight.current || clearing) return;
+    setClearing(true);
+    setError(null);
+    try {
+      await clearJob(job.id);
+      setJobId(null);
+      setLocalJob(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to clear upload');
+    } finally {
+      setClearing(false);
+    }
+  };
+
   const onStart = async () => {
-    if (!job) return;
+    if (!job || startInFlight.current) return;
+    startInFlight.current = true;
     setStarting(true);
     setError(null);
     try {
@@ -43,8 +64,9 @@ export function TranslatorPage() {
       setJobId(updated.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to start translation');
-    } finally {
       setStarting(false);
+    } finally {
+      startInFlight.current = false;
     }
   };
 
@@ -89,7 +111,13 @@ export function TranslatorPage() {
 
       {job && (
         <div className="space-y-6">
-          <FileMetaCard job={job} onStart={onStart} starting={starting} />
+          <FileMetaCard
+            job={job}
+            onStart={onStart}
+            onClear={onClear}
+            starting={starting}
+            clearing={clearing}
+          />
           <ProgressPanel job={job} />
           <CompletionCard job={job} />
           {(job.status === 'completed' ||

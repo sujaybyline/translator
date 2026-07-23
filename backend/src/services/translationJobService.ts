@@ -51,6 +51,9 @@ export interface JobState {
 }
 
 const memoryJobs = new Map<string, JobState>();
+const cancellationRequests = new Set<string>();
+const pipelinePromises = new Map<string, Promise<void>>();
+const pipelineControllers = new Map<string, AbortController>();
 
 function publicJob(job: JobState) {
   const { rawXml: _r, parseSegments: _p, ...rest } = job;
@@ -231,21 +234,71 @@ export async function startTranslation(jobId: string): Promise<JobState> {
   if (!job) {
     throw new Error('Translation job not found. Please upload the file again.');
   }
-  if (job.status === 'translating' || job.status === 'processing') {
-    return publicJob(job) as JobState;
-  }
-  if (job.status === 'completed') {
+  if (job.status !== 'uploaded') {
     return publicJob(job) as JobState;
   }
 
-  void runTranslationPipeline(jobId);
   job.status = 'preparing';
   await persistJob(job);
+  const controller = new AbortController();
+  pipelineControllers.set(jobId, controller);
+  const pipeline = runTranslationPipeline(jobId, controller.signal);
+  pipelinePromises.set(jobId, pipeline);
+  void pipeline.then(
+    () => {
+      pipelinePromises.delete(jobId);
+      pipelineControllers.delete(jobId);
+    },
+    () => {
+      pipelinePromises.delete(jobId);
+      pipelineControllers.delete(jobId);
+    },
+  );
   return publicJob(job) as JobState;
+}
+
+export async function clearJob(jobId: string): Promise<boolean> {
+  const job = memoryJobs.get(jobId);
+  if (!job) {
+    const persistedJob = await db.getJobById(jobId);
+    if (!persistedJob) return false;
+    if (persistedJob.status !== 'uploaded') return false;
+    await db.deleteJob(jobId);
+    await removeJobFiles(persistedJob.upload_path, persistedJob.output_path);
+    return true;
+  }
+
+  if (job.status !== 'uploaded' && job.status !== 'failed') {
+    if (!pipelinePromises.has(jobId)) return false;
+    cancellationRequests.add(jobId);
+    pipelineControllers.get(jobId)?.abort();
+    await pipelinePromises.get(jobId);
+  }
+  const currentJob = memoryJobs.get(jobId);
+  if (!currentJob) return true;
+  if (currentJob.status !== 'uploaded') return false;
+  memoryJobs.delete(jobId);
+  await db.deleteJob(jobId);
+  await removeJobFiles(currentJob.uploadPath, currentJob.outputPath);
+  return true;
+}
+
+async function removeJobFiles(...filePaths: Array<string | null | undefined>): Promise<void> {
+  await Promise.all(
+    filePaths
+      .filter((filePath): filePath is string => Boolean(filePath))
+      .map((filePath) => fs.unlink(filePath).catch(() => undefined)),
+  );
 }
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function throwIfCancellationRequested(jobId: string): void {
+  if (cancellationRequests.has(jobId)) {
+    throw new Error('Translation cancelled.');
+  }
 }
 
 function computeBatchSize(
@@ -267,7 +320,7 @@ function computeBatchSize(
   return Math.max(1, size);
 }
 
-async function runTranslationPipeline(jobId: string): Promise<void> {
+async function runTranslationPipeline(jobId: string, signal: AbortSignal): Promise<void> {
   const job = memoryJobs.get(jobId);
   if (!job || !job.rawXml || !job.parseSegments) return;
 
@@ -275,14 +328,17 @@ async function runTranslationPipeline(jobId: string): Promise<void> {
     job.status = 'parsing';
     job.progressPercent = 5;
     await persistJob(job);
+    throwIfCancellationRequested(jobId);
 
     job.status = 'detecting_language';
     job.progressPercent = 10;
     await persistJob(job);
+    throwIfCancellationRequested(jobId);
 
     job.status = 'preparing';
     job.progressPercent = 15;
     await persistJob(job);
+    throwIfCancellationRequested(jobId);
 
     const protectedSegments: ProtectedSegment[] = job.parseSegments.map((s) => {
       const { protectedText, tokenMap } = protectPlaceholders(s.sourceText);
@@ -292,14 +348,16 @@ async function runTranslationPipeline(jobId: string): Promise<void> {
     job.status = 'translating';
     await persistJob(job);
 
-    const translator = new GeminiTranslator();
+    const translator = new GeminiTranslator(signal);
     const allResults: TranslationResultItem[] = [];
     let quotaHit = false;
 
     for (let i = 0; i < protectedSegments.length; ) {
+      throwIfCancellationRequested(jobId);
       const batchSize = computeBatchSize(protectedSegments, i, config.batchSize);
       const batch = protectedSegments.slice(i, i + batchSize);
       const results = await translator.translateBatch(batch, job.targetLanguageName);
+      throwIfCancellationRequested(jobId);
       allResults.push(...results);
 
       if (results.some((r) => r.error && isQuotaError(new Error(r.error)))) {
@@ -322,11 +380,13 @@ async function runTranslationPipeline(jobId: string): Promise<void> {
         };
       });
       await persistJob(job);
+      throwIfCancellationRequested(jobId);
 
       i += batch.length;
 
       if (i < protectedSegments.length) {
         await sleep(config.batchDelayMs);
+        throwIfCancellationRequested(jobId);
       }
 
       if (quotaHit && results.every((r) => r.status === 'failed')) {
@@ -339,6 +399,7 @@ async function runTranslationPipeline(jobId: string): Promise<void> {
     job.status = 'validating';
     job.progressPercent = 92;
     await persistJob(job);
+    throwIfCancellationRequested(jobId);
 
     const successful = allResults.filter(
       (r) => r.status === 'translated' && r.translatedText.length > 0,
@@ -350,6 +411,7 @@ async function runTranslationPipeline(jobId: string): Promise<void> {
     job.status = 'rebuilding';
     job.progressPercent = 95;
     await persistJob(job);
+    throwIfCancellationRequested(jobId);
 
     const rebuilt = rebuildXliff({
       rawXml: job.rawXml,
@@ -372,6 +434,7 @@ async function runTranslationPipeline(jobId: string): Promise<void> {
     const outputPath = path.join(config.paths.output, `${job.id}_${outputFilename}`);
     await fs.mkdir(config.paths.output, { recursive: true });
     await fs.writeFile(outputPath, rebuilt, 'utf8');
+    throwIfCancellationRequested(jobId);
 
     job.outputFilename = outputFilename;
     job.outputPath = outputPath;
@@ -391,6 +454,7 @@ async function runTranslationPipeline(jobId: string): Promise<void> {
     });
 
     await persistJob(job);
+    throwIfCancellationRequested(jobId);
     await db.replaceSegments(
       job.id,
       job.segments.map((s, idx) => ({
@@ -408,6 +472,13 @@ async function runTranslationPipeline(jobId: string): Promise<void> {
       await fs.unlink(job.uploadPath).catch(() => undefined);
     }
   } catch (err) {
+    if (cancellationRequests.has(jobId)) {
+      cancellationRequests.delete(jobId);
+      memoryJobs.delete(jobId);
+      await db.deleteJob(jobId);
+      await removeJobFiles(job.uploadPath, job.outputPath);
+      return;
+    }
     job.status = 'failed';
     job.errorMessage =
       err instanceof Error ? err.message : 'Translation failed due to an unexpected error.';

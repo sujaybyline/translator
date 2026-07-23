@@ -7,6 +7,7 @@ const router = Router();
 router.get('/health', ctrl.health);
 router.post('/translate/upload', uploadMiddleware, ctrl.uploadFile);
 router.post('/translate/start', ctrl.startTranslation);
+router.delete('/translate/:jobId', ctrl.clearJob);
 router.get('/translate/:jobId', ctrl.getJob);
 router.get('/translate/:jobId/preview', ctrl.getPreview);
 router.get('/translate/:jobId/download', ctrl.downloadJob);

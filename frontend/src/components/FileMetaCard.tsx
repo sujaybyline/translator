@@ -4,14 +4,17 @@ import { formatBytes, statusLabel } from '../utils/format';
 interface Props {
   job: TranslationJob;
   onStart: () => void;
+  onClear: () => void;
   starting?: boolean;
+  clearing?: boolean;
 }
 
-export function FileMetaCard({ job, onStart, starting }: Props) {
+export function FileMetaCard({ job, onStart, onClear, starting, clearing }: Props) {
   const ready = job.status === 'uploaded';
   const busy = ['parsing', 'detecting_language', 'preparing', 'translating', 'validating', 'rebuilding', 'processing'].includes(
     job.status,
   );
+  const cancellable = busy;
 
   return (
     <div className="rounded-2xl border border-[var(--color-line)] bg-white/80 p-6 shadow-sm">
@@ -39,13 +42,45 @@ export function FileMetaCard({ job, onStart, starting }: Props) {
       </dl>
 
       {ready && (
+        <div className="mt-6 flex flex-wrap gap-3">
+          <button
+            type="button"
+            onClick={onStart}
+            disabled={starting || clearing}
+            aria-busy={starting}
+            className="w-full rounded-xl bg-[var(--color-brand)] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[var(--color-brand-light)] disabled:opacity-60 sm:w-auto"
+          >
+            {starting ? (
+              <span className="inline-flex items-center gap-2">
+                <span
+                  aria-hidden="true"
+                  className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white"
+                />
+                Starting…
+              </span>
+            ) : (
+              'Start Translation'
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={onClear}
+            disabled={starting || clearing}
+            className="w-full rounded-xl border border-[var(--color-line)] px-5 py-3 text-sm font-semibold text-[var(--color-ink-soft)] transition hover:bg-[var(--color-paper)] disabled:opacity-60 sm:w-auto"
+          >
+            {clearing ? 'Clearing…' : 'Clear Upload'}
+          </button>
+        </div>
+      )}
+
+      {(!ready && cancellable) && (
         <button
           type="button"
-          onClick={onStart}
-          disabled={starting}
-          className="mt-6 w-full rounded-xl bg-[var(--color-brand)] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[var(--color-brand-light)] disabled:opacity-60 sm:w-auto"
+          onClick={onClear}
+          disabled={clearing}
+          className="mt-6 rounded-xl border border-[var(--color-line)] px-5 py-3 text-sm font-semibold text-[var(--color-ink-soft)] transition hover:bg-[var(--color-paper)] disabled:opacity-60"
         >
-          {starting ? 'Starting…' : 'Start Translation'}
+          {clearing ? 'Cancelling…' : 'Cancel Processing'}
         </button>
       )}
 

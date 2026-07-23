@@ -35,6 +35,18 @@ export async function startTranslation(
   }
 }
 
+export async function clearJob(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const cleared = await jobService.clearJob(req.params.jobId);
+    if (!cleared) {
+      throw new AppError('This job cannot be cleared or cancelled in its current state.', 409);
+    }
+    res.json({ success: true, data: null });
+  } catch (err) {
+    next(err);
+  }
+}
+
 export async function getJob(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const job = await jobService.getJobAsync(req.params.jobId);
