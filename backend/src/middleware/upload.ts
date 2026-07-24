@@ -1,13 +1,12 @@
 import multer from 'multer';
 import path from 'node:path';
-import fs from 'node:fs';
 import { v4 as uuidv4 } from 'uuid';
 import { config } from '../config.js';
 import { isSupportedXliffExtension } from '../parsers/xliffParser.js';
 import { AppError } from './errorHandler.js';
+import { ensureStorageDirectories } from '../services/fileStorage.js';
 
-fs.mkdirSync(config.paths.uploads, { recursive: true });
-fs.mkdirSync(config.paths.output, { recursive: true });
+void ensureStorageDirectories();
 
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => {

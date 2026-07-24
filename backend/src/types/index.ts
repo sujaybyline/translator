@@ -16,12 +16,35 @@ export type SegmentStatus = 'pending' | 'translated' | 'failed' | 'skipped';
 
 export type XliffVersion = '1.2' | '2.0' | 'unknown';
 
-/** Supported target languages — V1 uses German only; extend this map later. */
+/** Supported target languages for translation output. */
 export const SUPPORTED_TARGET_LANGUAGES = {
   de: { code: 'de', name: 'German', nativeName: 'Deutsch' },
+  fr: { code: 'fr', name: 'French', nativeName: 'Français' },
+  es: { code: 'es', name: 'Spanish', nativeName: 'Español' },
+  it: { code: 'it', name: 'Italian', nativeName: 'Italiano' },
+  pt: { code: 'pt', name: 'Portuguese', nativeName: 'Português' },
+  nl: { code: 'nl', name: 'Dutch', nativeName: 'Nederlands' },
 } as const;
 
 export type TargetLanguageCode = keyof typeof SUPPORTED_TARGET_LANGUAGES;
+
+export function isSupportedTargetLanguage(code: string): code is TargetLanguageCode {
+  return code in SUPPORTED_TARGET_LANGUAGES;
+}
+
+export function resolveTargetLanguage(code: string): {
+  code: TargetLanguageCode;
+  name: string;
+  nativeName: string;
+} {
+  const normalized = code.trim().toLowerCase();
+  if (!isSupportedTargetLanguage(normalized)) {
+    throw new Error(
+      `Unsupported target language "${code}". Supported: ${Object.keys(SUPPORTED_TARGET_LANGUAGES).join(', ')}`,
+    );
+  }
+  return SUPPORTED_TARGET_LANGUAGES[normalized];
+}
 
 export interface TranslatableSegment {
   id: string;

@@ -19,6 +19,8 @@ uploads/*
 !uploads/.gitkeep
 output/*
 !output/.gitkeep
+backup/*
+!backup/.gitkeep
 
 # Logs & OS
 *.log

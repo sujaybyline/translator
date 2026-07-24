@@ -17,12 +17,21 @@ function intEnv(name: string, fallback: number): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
+function resolveStoragePath(envValue: string | undefined, fallbackRelative: string): string {
+  if (envValue?.trim()) {
+    return path.isAbsolute(envValue) ? envValue : path.resolve(projectRoot, envValue);
+  }
+  return path.resolve(projectRoot, fallbackRelative);
+}
+
 export const config = {
   port: intEnv('PORT', 4000),
   nodeEnv: process.env.NODE_ENV ?? 'development',
   frontendUrl: process.env.FRONTEND_URL ?? 'http://localhost:5173',
   geminiApiKey: process.env.GEMINI_API_KEY ?? '',
   geminiModel: process.env.GEMINI_MODEL ?? 'gemini-2.0-flash',
+  anthropicApiKey: process.env.ANTHROPIC_API_KEY ?? '',
+  anthropicModel: process.env.ANTHROPIC_MODEL ?? 'claude-sonnet-5',
   batchSize: intEnv('TRANSLATION_BATCH_SIZE', 8),
   batchDelayMs: intEnv('TRANSLATION_BATCH_DELAY_MS', 2500),
   maxRetries: intEnv('TRANSLATION_MAX_RETRIES', 3),
@@ -36,8 +45,9 @@ export const config = {
     url: process.env.DATABASE_URL ?? '',
   },
   paths: {
-    uploads: path.resolve(projectRoot, 'uploads'),
-    output: path.resolve(projectRoot, 'output'),
+    uploads: resolveStoragePath(process.env.UPLOAD_DIR, 'uploads'),
+    output: resolveStoragePath(process.env.OUTPUT_DIR, 'output'),
+    backup: resolveStoragePath(process.env.BACKUP_DIR, 'backup'),
   },
   defaultTargetLanguage: 'de' as const,
 };

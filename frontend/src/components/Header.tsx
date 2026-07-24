@@ -22,7 +22,7 @@ export function Header() {
               XLIFF AI Translator
             </span>
             <span className="mt-0.5 block text-xs tracking-wide text-[var(--color-ink-soft)]">
-              Auto Detect → German
+              English → Your Language
             </span>
           </span>
         </NavLink>

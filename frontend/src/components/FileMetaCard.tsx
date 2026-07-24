@@ -1,20 +1,40 @@
 import type { TranslationJob } from '../types';
+import { TARGET_LANGUAGES } from '../types';
+import { useEffect, useState } from 'react';
 import { formatBytes, statusLabel } from '../utils/format';
 
 interface Props {
   job: TranslationJob;
-  onStart: () => void;
+  onStart: (targetLanguage: string) => void;
   onClear: () => void;
   starting?: boolean;
   clearing?: boolean;
 }
 
 export function FileMetaCard({ job, onStart, onClear, starting, clearing }: Props) {
+  const [targetLanguage, setTargetLanguage] = useState(job.targetLanguage || 'de');
   const ready = job.status === 'uploaded';
-  const busy = ['parsing', 'detecting_language', 'preparing', 'translating', 'validating', 'rebuilding', 'processing'].includes(
-    job.status,
-  );
+  const busy = [
+    'parsing',
+    'detecting_language',
+    'preparing',
+    'translating',
+    'validating',
+    'rebuilding',
+    'processing',
+  ].includes(job.status);
   const cancellable = busy;
+
+  useEffect(() => {
+    if (job.targetLanguage) {
+      setTargetLanguage(job.targetLanguage);
+    }
+  }, [job.targetLanguage]);
+
+  const selectedLanguageName =
+    TARGET_LANGUAGES.find((lang) => lang.code === targetLanguage)?.name ??
+    job.targetLanguageName ??
+    'Unknown';
 
   return (
     <div className="rounded-2xl border border-[var(--color-line)] bg-white/80 p-6 shadow-sm">
@@ -37,15 +57,38 @@ export function FileMetaCard({ job, onStart, onClear, starting, clearing }: Prop
         <Meta label="XLIFF version" value={job.xliffVersion ?? '—'} />
         <Meta label="Translation units" value={String(job.totalSegments)} />
         <Meta label="Source language" value={job.sourceLanguageName || 'Auto Detect'} />
-        <Meta label="Target language" value="German" />
-        <Meta label="Direction" value="Auto Detect → German" />
+        <div className="rounded-xl bg-[var(--color-paper)]/80 px-4 py-3">
+          <label className="text-xs text-[var(--color-ink-soft)]">Target language</label>
+          {ready ? (
+            <select
+              value={targetLanguage}
+              onChange={(e) => setTargetLanguage(e.target.value)}
+              className="mt-2 w-full rounded-lg border border-[var(--color-line)] bg-white px-3 py-2 text-base font-semibold text-[var(--color-ink)] focus:border-[var(--color-brand)] focus:outline-none"
+            >
+              {TARGET_LANGUAGES.map((lang) => (
+                <option key={lang.code} value={lang.code}>
+                  {lang.name}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <p className="mt-2 text-base font-semibold text-[var(--color-ink)]">
+              {job.targetLanguageName || selectedLanguageName}
+            </p>
+          )}
+        </div>
+
+        <Meta
+          label="Direction"
+          value={`${job.sourceLanguageName || 'Auto Detect'} → ${ready ? selectedLanguageName : job.targetLanguageName || selectedLanguageName}`}
+        />
       </dl>
 
       {ready && (
         <div className="mt-6 flex flex-wrap gap-3">
           <button
             type="button"
-            onClick={onStart}
+            onClick={() => onStart(targetLanguage)}
             disabled={starting || clearing}
             aria-busy={starting}
             className="w-full rounded-xl bg-[var(--color-brand)] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[var(--color-brand-light)] disabled:opacity-60 sm:w-auto"
@@ -73,7 +116,7 @@ export function FileMetaCard({ job, onStart, onClear, starting, clearing }: Prop
         </div>
       )}
 
-      {(!ready && cancellable) && (
+      {!ready && cancellable && (
         <button
           type="button"
           onClick={onClear}

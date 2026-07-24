@@ -75,14 +75,14 @@ export function TranslatorPage() {
     }
   };
 
-  const onStart = async () => {
+  const onStart = async (targetLanguage: string) => {
     if (!job || startInFlight.current) return;
     jobSelectionChanged.current = true;
     startInFlight.current = true;
     setStarting(true);
     setError(null);
     try {
-      const updated = await startTranslation(job.id);
+      const updated = await startTranslation(job.id, targetLanguage);
       setLocalJob(updated);
       setJobId(updated.id);
     } catch (err) {
@@ -115,8 +115,7 @@ export function TranslatorPage() {
           Translate Your XLIFF Files with AI
         </h1>
         <p className="relative mt-4 max-w-2xl text-base text-white/80 sm:text-lg">
-          Upload an XLIFF file and translate its content into German while preserving the original
-          XLIFF structure.
+          Upload an XLIFF file and translate its content into your selected language while preserving the original XLIFF structure.
         </p>
       </section>
 

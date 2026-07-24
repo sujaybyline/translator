@@ -42,3 +42,18 @@ CREATE TABLE IF NOT EXISTS translation_segments (
   INDEX idx_segments_job (translation_job_id),
   INDEX idx_segments_status (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+
+
+CREATE TABLE IF NOT EXISTS app_settings (
+    id TINYINT PRIMARY KEY DEFAULT 1,
+    provider ENUM('gemini', 'anthropic') NOT NULL,
+    model VARCHAR(150) NOT NULL,
+    api_key TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        ON UPDATE CURRENT_TIMESTAMP,
+    CHECK (id = 1)
+) ENGINE=InnoDB
+DEFAULT CHARSET=utf8mb4
+COLLATE=utf8mb4_unicode_ci;

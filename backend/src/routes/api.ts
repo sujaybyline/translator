@@ -12,5 +12,7 @@ router.get('/translate/:jobId', ctrl.getJob);
 router.get('/translate/:jobId/preview', ctrl.getPreview);
 router.get('/translate/:jobId/download', ctrl.downloadJob);
 router.get('/translation-history', ctrl.getHistory);
+router.get('/settings', ctrl.getSettings);
+router.put('/settings', ctrl.saveSettings);
 
 export default router;

@@ -74,7 +74,7 @@ export function PreviewTable({ job }: Props) {
             Translation preview
           </h3>
           <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
-            Read-only review of source segments and German translations.
+            Read-only review of source segments and {job.targetLanguageName.toLowerCase()} translations.
           </p>
         </div>
         <input
@@ -94,7 +94,7 @@ export function PreviewTable({ job }: Props) {
             <tr className="border-b border-[var(--color-line)] text-xs uppercase tracking-wide text-[var(--color-ink-soft)]">
               <th className="px-3 py-2 font-semibold">Segment ID</th>
               <th className="px-3 py-2 font-semibold">Original</th>
-              <th className="px-3 py-2 font-semibold">German translation</th>
+              <th className="px-3 py-2 font-semibold">{job.targetLanguageName} translation</th>
               <th className="px-3 py-2 font-semibold">Status</th>
             </tr>
           </thead>
@@ -169,10 +169,13 @@ export function CompletionCard({ job }: { job: TranslationJob }) {
       <h3 className="font-[family-name:var(--font-display)] text-3xl text-[var(--color-ok)]">
         Translation Completed
       </h3>
-      <dl className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        <Row label="Original filename" value={job.originalFilename} />
+      <dl className="mt-5 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="sm:col-span-2 lg:col-span-3">
+          <Row label="Original filename" value={job.originalFilename} />
+        </div>
+
         <Row label="Source language" value={job.sourceLanguageName} />
-        <Row label="Target language" value="German" />
+        <Row label="Target language" value={job.targetLanguageName} />
         <Row label="XLIFF version" value={job.xliffVersion ?? '—'} />
         <Row label="Total segments" value={String(job.totalSegments)} />
         <Row label="Successfully translated" value={String(job.translatedSegments)} />
@@ -183,7 +186,7 @@ export function CompletionCard({ job }: { job: TranslationJob }) {
         href={getDownloadUrl(job.id)}
         className="mt-6 inline-flex rounded-xl bg-[var(--color-brand)] px-5 py-3 text-sm font-semibold text-white no-underline transition hover:bg-[var(--color-brand-light)]"
       >
-        Download German XLIFF
+        Download {job.targetLanguageName} XLIFF
       </a>
     </div>
   );
