@@ -1,4 +1,10 @@
-import type { ApiResponse, PreviewResponse, TranslationJob } from '../types';
+import type {
+  ApiResponse,
+  AppSettings,
+  PreviewResponse,
+  SaveAppSettingsInput,
+  TranslationJob,
+} from '../types';
 
 const API_BASE = import.meta.env.VITE_API_URL ?? '/api';
 
@@ -20,11 +26,14 @@ export async function uploadXliff(file: File): Promise<TranslationJob> {
   return parseJson<TranslationJob>(res);
 }
 
-export async function startTranslation(jobId: string): Promise<TranslationJob> {
+export async function startTranslation(
+  jobId: string,
+  targetLanguage: string,
+): Promise<TranslationJob> {
   const res = await fetch(`${API_BASE}/translate/start`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ jobId }),
+    body: JSON.stringify({ jobId, targetLanguage }),
   });
   return parseJson<TranslationJob>(res);
 }
@@ -63,9 +72,26 @@ export async function getHistory(): Promise<TranslationJob[]> {
 
 export async function getHealth(): Promise<{
   status: string;
-  geminiConfigured: boolean;
   database: string;
+  provider: string | null;
+  model: string | null;
+  hasApiKey: boolean;
+  aiConfigured: boolean;
 }> {
   const res = await fetch(`${API_BASE}/health`);
   return parseJson(res);
+}
+
+export async function getSettings(): Promise<AppSettings> {
+  const res = await fetch(`${API_BASE}/settings`);
+  return parseJson<AppSettings>(res);
+}
+
+export async function saveSettings(input: SaveAppSettingsInput): Promise<void> {
+  const res = await fetch(`${API_BASE}/settings`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  await parseJson<null>(res);
 }

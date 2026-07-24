@@ -7,14 +7,17 @@ import { detectSourceLanguage, languageCodeToName } from './languageDetection.js
 import { protectPlaceholders } from './placeholderProtection.js';
 import { rebuildXliff, buildOutputFilename } from './xliffRebuilder.js';
 import { validateGeneratedXliff } from '../validators/xliffValidator.js';
-import { GeminiTranslator, isQuotaError, userFacingError } from '../translators/geminiTranslator.js';
-import { SUPPORTED_TARGET_LANGUAGES } from '../types/index.js';
-import type {
-  JobStatus,
-  ProtectedSegment,
-  TranslatableSegment,
-  TranslationResultItem,
-  XliffVersion,
+import { isQuotaError, userFacingError } from '../translators/geminiTranslator.js';
+import { createConfiguredTranslator } from './appSettingsService.js';
+import { backupTranslatedFile, removeFiles } from './fileStorage.js';
+import {
+  resolveTargetLanguage,
+  SUPPORTED_TARGET_LANGUAGES,
+  type JobStatus,
+  type ProtectedSegment,
+  type TranslatableSegment,
+  type TranslationResultItem,
+  type XliffVersion,
 } from '../types/index.js';
 import * as db from '../db/pool.js';
 
@@ -65,6 +68,7 @@ async function persistJob(job: JobState): Promise<void> {
   await db.updateJob(job.id, {
     output_filename: job.outputFilename,
     source_language: job.sourceLanguage,
+    target_language: job.targetLanguage,
     xliff_version: job.xliffVersion,
     total_segments: job.totalSegments,
     translated_segments: job.translatedSegments,
@@ -203,7 +207,7 @@ export async function listHistory(): Promise<JobState[]> {
       targetLanguage: row.target_language,
       targetLanguageName:
         SUPPORTED_TARGET_LANGUAGES[row.target_language as keyof typeof SUPPORTED_TARGET_LANGUAGES]
-          ?.name ?? 'German',
+          ?.name ?? languageCodeToName(row.target_language),
       xliffVersion: (row.xliff_version as XliffVersion | null) ?? null,
       totalSegments: row.total_segments,
       translatedSegments: row.translated_segments,
@@ -229,7 +233,10 @@ export async function listHistory(): Promise<JobState[]> {
     .map((j) => publicJob(j) as JobState);
 }
 
-export async function startTranslation(jobId: string): Promise<JobState> {
+export async function startTranslation(
+  jobId: string,
+  targetLanguageCode?: string,
+): Promise<JobState> {
   const job = memoryJobs.get(jobId);
   if (!job) {
     throw new Error('Translation job not found. Please upload the file again.');
@@ -237,6 +244,10 @@ export async function startTranslation(jobId: string): Promise<JobState> {
   if (job.status !== 'uploaded') {
     return publicJob(job) as JobState;
   }
+
+  const target = resolveTargetLanguage(targetLanguageCode ?? config.defaultTargetLanguage);
+  job.targetLanguage = target.code;
+  job.targetLanguageName = target.name;
 
   job.status = 'preparing';
   await persistJob(job);
@@ -284,11 +295,7 @@ export async function clearJob(jobId: string): Promise<boolean> {
 }
 
 async function removeJobFiles(...filePaths: Array<string | null | undefined>): Promise<void> {
-  await Promise.all(
-    filePaths
-      .filter((filePath): filePath is string => Boolean(filePath))
-      .map((filePath) => fs.unlink(filePath).catch(() => undefined)),
-  );
+  await removeFiles(...filePaths);
 }
 
 function sleep(ms: number): Promise<void> {
@@ -348,7 +355,7 @@ async function runTranslationPipeline(jobId: string, signal: AbortSignal): Promi
     job.status = 'translating';
     await persistJob(job);
 
-    const translator = new GeminiTranslator(signal);
+    const translator = await createConfiguredTranslator(signal);
     const allResults: TranslationResultItem[] = [];
     let quotaHit = false;
 
@@ -391,7 +398,7 @@ async function runTranslationPipeline(jobId: string, signal: AbortSignal): Promi
 
       if (quotaHit && results.every((r) => r.status === 'failed')) {
         throw new Error(
-          userFacingError(new Error(results.find((r) => r.error)?.error ?? 'Gemini quota exceeded')),
+          userFacingError(new Error(results.find((r) => r.error)?.error ?? 'API quota exceeded')),
         );
       }
     }
@@ -434,6 +441,7 @@ async function runTranslationPipeline(jobId: string, signal: AbortSignal): Promi
     const outputPath = path.join(config.paths.output, `${job.id}_${outputFilename}`);
     await fs.mkdir(config.paths.output, { recursive: true });
     await fs.writeFile(outputPath, rebuilt, 'utf8');
+    await backupTranslatedFile(outputPath, `${job.id}_${outputFilename}`);
     throwIfCancellationRequested(jobId);
 
     job.outputFilename = outputFilename;

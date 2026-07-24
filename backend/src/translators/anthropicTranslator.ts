@@ -1,4 +1,4 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import Anthropic from '@anthropic-ai/sdk';
 import { config } from '../config.js';
 import type { ProtectedSegment, TranslationResultItem } from '../types/index.js';
 import {
@@ -43,7 +43,7 @@ function stripCodeFences(text: string): string {
   return cleaned.trim();
 }
 
-function parseGeminiJson(raw: string): Array<{ id: string; text: string }> {
+function parseAnthropicJson(raw: string): Array<{ id: string; text: string }> {
   const cleaned = stripCodeFences(raw);
 
   try {
@@ -74,7 +74,7 @@ function parseGeminiJson(raw: string): Array<{ id: string; text: string }> {
     }
   }
 
-  throw new Error('Failed to parse Gemini translation response as JSON.');
+  throw new Error('Failed to parse Anthropic translation response as JSON.');
 }
 
 async function sleep(ms: number, signal?: AbortSignal): Promise<void> {
@@ -104,47 +104,33 @@ function isQuotaError(err: unknown): boolean {
   return /quota|billing|exceeded your current/i.test(errorMessage(err));
 }
 
-function isInvalidKeyError(err: unknown): boolean {
-  return /API_KEY_INVALID|API key not valid/i.test(errorMessage(err));
-}
-
 function userFacingError(err: unknown): string {
   const msg = errorMessage(err);
   if (isQuotaError(err)) {
-    return 'Gemini API quota exceeded. Wait a few minutes or check billing at https://ai.google.dev/gemini-api/docs/rate-limits';
+    return 'Anthropic API quota exceeded. Wait a few minutes or check billing at https://console.anthropic.com/settings/billing';
   }
   if (isRateLimitError(err)) {
-    return 'Gemini rate limit reached. The job will retry automatically — please wait.';
+    return 'Anthropic rate limit reached. The job will retry automatically — please wait.';
   }
   return msg.slice(0, 300);
 }
 
-export class GeminiTranslator {
-  private genAI: GoogleGenerativeAI;
+export class AnthropicTranslator {
+  private client: Anthropic;
   private model: string;
   private signal?: AbortSignal;
 
   constructor(apiKey: string, model: string, signal?: AbortSignal) {
     if (!apiKey?.trim()) {
-      throw new Error('Gemini API key is not configured. Save an API key in Settings.');
+      throw new Error('Anthropic API key is not configured. Save an API key in Settings.');
     }
     if (!model?.trim()) {
-      throw new Error('Gemini model is not configured. Save a model in Settings.');
+      throw new Error('Anthropic model is not configured. Save a model in Settings.');
     }
 
-    this.genAI = new GoogleGenerativeAI(apiKey);
+    this.client = new Anthropic({ apiKey });
     this.model = model;
     this.signal = signal;
-  }
-
-  private getModel(modelName: string) {
-    return this.genAI.getGenerativeModel({
-      model: modelName,
-      generationConfig: {
-        temperature: 0.2,
-        responseMimeType: 'application/json',
-      },
-    });
   }
 
   private async callModel(prompt: string): Promise<string> {
@@ -152,31 +138,36 @@ export class GeminiTranslator {
 
     for (let attempt = 1; attempt <= config.maxRetries; attempt++) {
       try {
-        const result = await this.getModel(this.model).generateContent(prompt, {
-          signal: this.signal,
+        const response = await this.client.messages.create({
+          model: this.model,
+          max_tokens: 4096,
+          messages: [{ role: 'user', content: prompt }],
         });
-        return result.response.text();
+
+        return response.content
+          .filter((c) => c.type === 'text')
+          .map((c) => c.text)
+          .join('');
       } catch (err) {
         lastError = err;
-        console.warn(`[gemini] ${this.model} attempt ${attempt}:`, errorMessage(err).slice(0, 120));
+        console.warn(`[anthropic] ${this.model} attempt ${attempt}:`, errorMessage(err).slice(0, 120));
 
-        if (this.signal?.aborted) throw new Error('Translation cancelled.');
-        if (isInvalidKeyError(err)) {
-          throw new Error(userFacingError(err));
+        if (this.signal?.aborted) {
+          throw new Error('Translation cancelled.');
         }
+
         if (isRateLimitError(err)) {
           await sleep(Math.min(60_000, 2000 * attempt * attempt), this.signal);
           continue;
         }
+
         if (attempt < config.maxRetries) {
-          await sleep(800 * attempt, this.signal);
-          continue;
+          await sleep(1000 * attempt, this.signal);
         }
-        break;
       }
     }
 
-    throw lastError instanceof Error ? lastError : new Error('Gemini API request failed.');
+    throw lastError instanceof Error ? lastError : new Error('Anthropic request failed.');
   }
 
   async translateBatch(
@@ -209,16 +200,13 @@ export class GeminiTranslator {
     let translations: Array<{ id: string; text: string }>;
     try {
       const raw = await this.callModel(buildPrompt(items, targetLanguageName, false));
-      translations = parseGeminiJson(raw);
+      translations = parseAnthropicJson(raw);
     } catch (err) {
       if (this.signal?.aborted) throw new Error('Translation cancelled.');
-      if (isInvalidKeyError(err)) {
-        throw err;
-      }
       try {
         await sleep(3000, this.signal);
         const raw = await this.callModel(buildPrompt(items.slice(0, 5), targetLanguageName, true));
-        translations = parseGeminiJson(raw);
+        translations = parseAnthropicJson(raw);
         if (items.length > 5) {
           throw err;
         }
@@ -247,7 +235,7 @@ export class GeminiTranslator {
           translatedText: '',
           validationStatus: 'needs_review',
           status: 'failed',
-          error: 'Missing translation in Gemini response',
+          error: 'Missing translation in Anthropic response',
         });
         continue;
       }
@@ -259,7 +247,7 @@ export class GeminiTranslator {
           const retryRaw = await this.callModel(
             buildPrompt([{ id: segment.id, text: segment.protectedText }], targetLanguageName, true),
           );
-          const retryParsed = parseGeminiJson(retryRaw);
+          const retryParsed = parseAnthropicJson(retryRaw);
           const retryText = retryParsed.find((t) => t.id === segment.id)?.text;
           if (retryText != null) {
             const retryIntegrity = validatePlaceholderIntegrity(segment.protectedText, retryText);
@@ -314,4 +302,4 @@ export class GeminiTranslator {
   }
 }
 
-export { isQuotaError, isInvalidKeyError, userFacingError };
+export { isQuotaError, userFacingError };

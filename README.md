@@ -1,19 +1,21 @@
 # XLIFF AI Translator
 
-Production-ready web application that translates **XLIFF** files (`.xlf` / `.xliff`) into **German** using Google Gemini, while preserving the original XLIFF structure, IDs, metadata, placeholders, and inline tags — so the output remains usable in Text-to-Speech workflows.
+Production-ready web application that translates **XLIFF** files (`.xlf` / `.xliff`) into a selected target language using **Gemini** or **Anthropic**, while preserving the original XLIFF structure, IDs, metadata, placeholders, and inline tags — so the output remains usable in Text-to-Speech workflows.
 
 ## Features
 
 - Upload `.xlf` / `.xliff` (one file at a time)
 - Automatic XLIFF **1.2** and **2.0** detection
 - Automatic source language detection (from XLIFF attributes, with text fallback)
-- Target language: **German** (v1)
+- Target language selection: German, French, Spanish, Italian, Portuguese, Dutch
+- Dynamic AI provider/model configuration (Settings page, stored in MySQL)
 - Placeholder & inline-tag protection (`{name}`, `{{var}}`, `%CODE%`, `<ph>`, `<g>`, `<x>`, SSML-like tags)
-- Batched Gemini translation with retries and rate-limit handling
+- Batched AI translation with retries and rate-limit handling
 - Translation preview (search + pagination)
-- Download translated XLIFF (`*_de.xlf` / `*_de.xliff`)
-- Translation history (MySQL when configured; in-memory fallback otherwise)
-- Secure API key handling (backend only)
+- Download translated XLIFF (`*_{lang}.xlf`)
+- Translation history (MySQL)
+- Automatic output backup to dated backup folders
+- Secure API key handling (MySQL only, never returned to frontend)
 
 ## Technology stack
 
@@ -22,7 +24,7 @@ Production-ready web application that translates **XLIFF** files (`.xlf` / `.xli
 | Frontend | React, Vite, TypeScript, Tailwind CSS      |
 | Backend  | Node.js, Express, TypeScript               |
 | Database | MySQL                                      |
-| AI       | Google Gemini (`@google/generative-ai`)    |
+| AI       | Google Gemini or Anthropic (configured in Settings) |
 
 ## Folder structure
 
@@ -31,8 +33,9 @@ translator/
 ├── frontend/               # React + Vite UI
 ├── backend/                # Express API + XLIFF/Gemini pipeline
 ├── database/schema.sql     # MySQL schema
-├── uploads/                # Temporary uploads
-├── output/                 # Generated XLIFF files
+├── uploads/                # Temporary uploads (removed after successful translation)
+├── output/                 # Primary translated XLIFF files (served for download)
+├── backup/                 # Dated backup copies (YYYY/MM/DD/)
 ├── tests/samples/          # Sample XLIFF fixtures
 ├── .env.example
 └── README.md
@@ -41,8 +44,8 @@ translator/
 ## Prerequisites
 
 - **Node.js** 18+ (recommended 20+)
-- **MySQL** 8+ (optional for first run — app falls back to in-memory job store)
-- A **Google Gemini API key** from [Google AI Studio](https://aistudio.google.com/apikey)
+- **MySQL** 8+ (required for settings persistence and translation history)
+- AI provider API key (configure in **Settings** after first run)
 
 ## MySQL setup
 
@@ -72,8 +75,7 @@ Copy-Item .env.example .env
 2. Edit `.env` and set at least:
 
 ```env
-GEMINI_API_KEY=your_real_api_key_here
-PORT=4000
+PORT=4010
 FRONTEND_URL=http://localhost:5173
 
 DB_HOST=127.0.0.1
@@ -83,7 +85,17 @@ DB_PASSWORD=your_password_here
 DB_NAME=xliff_translator
 ```
 
-**Where to add the Gemini key:** put it only in the project-root `.env` file as `GEMINI_API_KEY`. Never put it in frontend code or commit `.env`.
+Configure the AI provider, model, and API key from the **Settings** page in the UI. Keys are stored in MySQL and are never returned to the browser.
+
+**VPS storage (recommended for production):**
+
+```env
+UPLOAD_DIR=/var/www/xliff-translator/uploads
+OUTPUT_DIR=/var/www/xliff-translator/output
+BACKUP_DIR=/var/www/xliff-translator/backup
+```
+
+These directories are created automatically on startup if they do not exist.
 
 ## Install dependencies
 
@@ -126,15 +138,16 @@ The Vite dev server proxies `/api` to the backend.
    - `sample_en_1.2.xliff`
    - `sample_en_2.0.xliff`
 4. Confirm detected version, source language, and segment count.
-5. Click **Start Translation**.
+5. Select a **target language** and click **Start Translation**.
 6. Wait for progress to reach **Completed**.
 7. Review the preview table.
-8. Click **Download German XLIFF**.
+8. Click **Download** for the translated XLIFF.
 9. Open the downloaded file and verify:
    - XML / XLIFF is valid
    - Placeholders like `{username}` and `{{minutes}}` are unchanged
    - `<ph>` / `<g>` tags are preserved
-   - `<target>` contains German text
+   - `<target>` contains text in the selected language
+   - `target-language` / `trgLang` matches the selected language code
 
 ### Backend unit tests (parser / placeholders / rebuild)
 
@@ -154,44 +167,98 @@ npm test
 2. Detect version and source language
 3. Extract translatable segments
 4. Protect placeholders and inline tags with temporary tokens (`__PH_N__`)
-5. Send batches to Gemini (default batch size 25, configurable)
+5. Send batches to the configured AI provider (default batch size 8, configurable)
 6. Validate placeholder integrity; retry with a stricter prompt if needed
 7. Restore placeholders and surgically insert `<target>` text into the original XML
-8. Re-validate generated XLIFF before download
+8. Write output to `output/`, create a dated backup copy in `backup/YYYY/MM/DD/`
+9. Remove the temporary upload file
+10. Re-validate generated XLIFF before download
 
-The Gemini API key never leaves the backend.
+AI credentials are loaded from MySQL on every translation — no restart required after changing Settings.
 
-## Adding new languages later
-
-V1 hard-codes German, but the code is structured for extension:
+## Adding new target languages
 
 1. Add entries to `SUPPORTED_TARGET_LANGUAGES` in `backend/src/types/index.ts`
-2. Accept a `targetLanguage` on `POST /api/translate/start`
-3. Pass the language name into `GeminiTranslator.translateBatch`
-4. Update the frontend language display / selection UI
-
-Future candidates called out in the product brief: French, Spanish, Arabic, Hindi, Portuguese, Italian.
+2. Add matching entries to `TARGET_LANGUAGES` in `frontend/src/types/index.ts`
+3. Restart is not required — the backend validates against the updated map on the next deploy
 
 ## API overview
 
 | Method | Path | Description |
 | ------ | ---- | ----------- |
 | `POST` | `/api/translate/upload` | Upload XLIFF (`multipart` field `file`) |
-| `POST` | `/api/translate/start` | Start job `{ "jobId": "..." }` |
+| `POST` | `/api/translate/start` | Start job `{ "jobId": "...", "targetLanguage": "de" }` |
+| `GET`  | `/api/settings` | AI provider settings (`hasApiKey` only, no key) |
+| `PUT`  | `/api/settings` | Save AI provider settings |
+| `GET`  | `/api/health` | Health + DB/AI configuration status |
+
 | `GET`  | `/api/translate/:jobId` | Job status / progress |
 | `GET`  | `/api/translate/:jobId/preview` | Preview segments (`q`, `page`, `pageSize`) |
 | `GET`  | `/api/translate/:jobId/download` | Download translated XLIFF |
 | `GET`  | `/api/translation-history` | History list |
-| `GET`  | `/api/health` | Health + Gemini/DB status |
 
 ## Security notes
 
 - File type and size limits
 - DOCTYPE / ENTITY blocked (XXE protection)
-- Gemini key only in backend `.env`
+- AI API keys stored in MySQL only; never returned to the frontend
 - CORS limited to `FRONTEND_URL`
-- Temporary uploads cleaned after successful translation
+- Temporary uploads removed after successful translation
 - User-facing errors are sanitized; details logged server-side
+
+## Production deployment (VPS)
+
+### Directory layout
+
+```text
+/var/www/xliff-translator/
+├── app/          # application code (git checkout or release artifact)
+├── uploads/      # temporary uploads
+├── output/       # primary translated files (served for download)
+└── backup/       # dated backup copies (YYYY/MM/DD/)
+```
+
+Set in `.env`:
+
+```env
+UPLOAD_DIR=/var/www/xliff-translator/uploads
+OUTPUT_DIR=/var/www/xliff-translator/output
+BACKUP_DIR=/var/www/xliff-translator/backup
+```
+
+### Preserve data across deployments
+
+**Do not delete** `uploads/`, `output/`, or `backup/` during deploy. Only replace application code (`backend/dist`, `frontend/dist`).
+
+Recommended deploy steps:
+
+1. Pull or copy new code into `app/`
+2. Run `npm run build` inside `app/`
+3. Restart the backend process (`npm run start:backend` or your process manager)
+4. Serve `frontend/dist` with nginx or another static host
+
+### Filesystem permissions
+
+Ensure the user running the Node process can read/write all three storage directories:
+
+```bash
+mkdir -p /var/www/xliff-translator/{uploads,output,backup}
+chown -R www-data:www-data /var/www/xliff-translator/{uploads,output,backup}
+chmod 750 /var/www/xliff-translator/{uploads,output,backup}
+```
+
+### Backup strategy
+
+Every successful translation:
+
+1. Writes the output file to `OUTPUT_DIR`
+2. Copies it to `BACKUP_DIR/YYYY/MM/DD/{jobId}_{filename}`
+
+Primary downloads always use `OUTPUT_DIR`. If a primary file is lost, restore from the dated backup tree.
+
+### Process restarts
+
+Output files and backups live on disk — they survive application restarts, server reboots, and code updates as long as the storage directories are preserved.
 
 ## Production build
 

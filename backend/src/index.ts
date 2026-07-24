@@ -2,11 +2,14 @@ import express from 'express';
 import cors from 'cors';
 import { config } from './config.js';
 import { initDatabase } from './db/pool.js';
+import { getPublicAppSettings } from './services/appSettingsService.js';
+import { ensureStorageDirectories } from './services/fileStorage.js';
 import apiRouter from './routes/api.js';
 import { errorHandler } from './middleware/errorHandler.js';
 
 async function main() {
   await initDatabase();
+  await ensureStorageDirectories();
 
   const app = express();
   app.use(
@@ -24,11 +27,14 @@ async function main() {
   app.use('/api', apiRouter);
   app.use(errorHandler);
 
-  app.listen(config.port, () => {
+  app.listen(config.port, async () => {
     console.log(`[server] XLIFF AI Translator API listening on http://localhost:${config.port}`);
     console.log(`[server] CORS origin: ${config.frontendUrl}`);
-    if (!config.geminiApiKey || config.geminiApiKey === 'your_api_key_here') {
-      console.warn('[server] WARNING: GEMINI_API_KEY is not set. Translation will fail until configured.');
+    const settings = await getPublicAppSettings();
+    if (!settings.hasApiKey || !settings.provider || !settings.model) {
+      console.warn(
+        '[server] AI provider is not fully configured. Save provider, model, and API key in Settings.',
+      );
     }
   });
 }

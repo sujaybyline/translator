@@ -91,6 +91,7 @@ export async function updateJob(
   fields: Partial<{
     output_filename: string | null;
     source_language: string | null;
+    target_language: string;
     xliff_version: string | null;
     total_segments: number;
     translated_segments: number;
@@ -104,6 +105,7 @@ export async function updateJob(
   const allowed = [
     'output_filename',
     'source_language',
+    'target_language',
     'xliff_version',
     'total_segments',
     'translated_segments',
@@ -204,6 +206,72 @@ export async function getSegmentsByJobId(
   );
   return rows as TranslationSegmentRecord[];
 }
+export interface AppSettingsRecord {
+  provider: 'gemini' | 'anthropic';
+  model: string;
+  api_key: string;
+}
+
+export async function getAppSettings(): Promise<AppSettingsRecord | null> {
+  if (!dbAvailable || !pool) return null;
+
+  const [rows] = await pool.execute<RowDataPacket[]>(
+    `SELECT provider, model, api_key
+     FROM app_settings
+     WHERE id = 1`,
+  );
+
+  return (rows[0] as AppSettingsRecord) ?? null;
+}
+
+export async function saveAppSettings(settings: {
+  provider: 'gemini' | 'anthropic';
+  model: string;
+  api_key?: string;
+}): Promise<void> {
+  if (!dbAvailable || !pool) {
+    throw new Error('Database is unavailable. Configure MySQL to save AI settings.');
+  }
+
+  const existing = await getAppSettings();
+  const apiKey = settings.api_key?.trim();
+
+  if (!existing && !apiKey) {
+    throw new Error('api_key is required when saving settings for the first time.');
+  }
+
+  if (apiKey) {
+    await pool.execute(
+      `INSERT INTO app_settings (id, provider, model, api_key)
+       VALUES (1, :provider, :model, :api_key)
+       ON DUPLICATE KEY UPDATE
+         provider = VALUES(provider),
+         model = VALUES(model),
+         api_key = VALUES(api_key)`,
+      {
+        provider: settings.provider,
+        model: settings.model,
+        api_key: apiKey,
+      },
+    );
+    return;
+  }
+
+  if (!existing) {
+    throw new Error('api_key is required when saving settings for the first time.');
+  }
+
+  await pool.execute(
+    `UPDATE app_settings
+     SET provider = :provider, model = :model
+     WHERE id = 1`,
+    {
+      provider: settings.provider,
+      model: settings.model,
+    },
+  );
+}
+
 
 export async function pingDatabase(): Promise<boolean> {
   if (!dbAvailable || !pool) return false;

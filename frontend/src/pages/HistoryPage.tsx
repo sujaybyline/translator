@@ -78,7 +78,7 @@ export function HistoryPage() {
                   <tr key={job.id} className="border-b border-[var(--color-line)]/70">
                     <td className="px-4 py-3 font-medium">{job.originalFilename}</td>
                     <td className="px-4 py-3">{job.sourceLanguageName}</td>
-                    <td className="px-4 py-3">{job.targetLanguageName || 'German'}</td>
+                    <td className="px-4 py-3">{job.targetLanguageName}</td>
                     <td className="px-4 py-3">{job.xliffVersion ?? '—'}</td>
                     <td className="px-4 py-3">{job.totalSegments}</td>
                     <td className="px-4 py-3">
