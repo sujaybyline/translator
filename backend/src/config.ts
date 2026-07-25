@@ -35,8 +35,8 @@ export const config = {
   geminiModel: process.env.GEMINI_MODEL ?? 'gemini-2.0-flash',
   anthropicApiKey: process.env.ANTHROPIC_API_KEY ?? '',
   anthropicModel: process.env.ANTHROPIC_MODEL ?? 'claude-sonnet-5',
-  batchSize: intEnv('TRANSLATION_BATCH_SIZE', 8),
-  batchDelayMs: intEnv('TRANSLATION_BATCH_DELAY_MS', 2500),
+  batchSize: intEnv('TRANSLATION_BATCH_SIZE', 25),
+  batchDelayMs: intEnv('TRANSLATION_BATCH_DELAY_MS', 1000),
   maxRetries: intEnv('TRANSLATION_MAX_RETRIES', 3),
   maxFileSize: intEnv('MAX_FILE_SIZE', 10 * 1024 * 1024),
   db: {

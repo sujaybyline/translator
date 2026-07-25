@@ -372,22 +372,43 @@ async function runTranslationPipeline(jobId: string, signal: AbortSignal): Promi
     const allResults: TranslationResultItem[] = [];
     let quotaHit = false;
 
-    for (let i = 0; i < protectedSegments.length; ) {
-      throwIfCancellationRequested(jobId);
-      const batchSize = computeBatchSize(protectedSegments, i, config.batchSize);
-      const batch = protectedSegments.slice(i, i + batchSize);
-      const results = await translator.translateBatch(batch, job.targetLanguageName);
-      throwIfCancellationRequested(jobId);
-      allResults.push(...results);
+    const CONCURRENT_BATCHES = 4;
 
-      if (results.some((r) => r.error && isQuotaError(new Error(r.error)))) {
-        quotaHit = true;
+    // Pre-build all batches upfront
+    const batches: ProtectedSegment[][] = [];
+    for (let i = 0; i < protectedSegments.length; ) {
+      const batchSize = computeBatchSize(protectedSegments, i, config.batchSize);
+      batches.push(protectedSegments.slice(i, i + batchSize));
+      i += batchSize;
+    }
+
+    // Process batches in parallel groups of CONCURRENT_BATCHES
+    for (let g = 0; g < batches.length; g += CONCURRENT_BATCHES) {
+      throwIfCancellationRequested(jobId);
+
+      const group = batches.slice(g, g + CONCURRENT_BATCHES);
+      const groupResults = await Promise.all(
+        group.map((batch) => translator.translateBatch(batch, job.targetLanguageName)),
+      );
+      throwIfCancellationRequested(jobId);
+
+      for (const results of groupResults) {
+        allResults.push(...results);
+        if (results.some((r) => r.error && isQuotaError(new Error(r.error)))) {
+          quotaHit = true;
+        }
+        if (quotaHit && results.every((r) => r.status === 'failed')) {
+          throw new Error(
+            userFacingError(new Error(results.find((r) => r.error)?.error ?? 'API quota exceeded')),
+          );
+        }
       }
 
+      const processedCount = Math.min((g + CONCURRENT_BATCHES), batches.length);
       job.translatedSegments = allResults.filter((r) => r.status === 'translated').length;
       job.progressPercent = Math.min(
         90,
-        Math.round(((i + batch.length) / protectedSegments.length) * 80) + 15,
+        Math.round((processedCount / batches.length) * 80) + 15,
       );
       job.segments = job.parseSegments.map((s) => {
         const r = allResults.find((x) => x.id === s.id);
@@ -402,17 +423,10 @@ async function runTranslationPipeline(jobId: string, signal: AbortSignal): Promi
       await persistJob(job);
       throwIfCancellationRequested(jobId);
 
-      i += batch.length;
-
-      if (i < protectedSegments.length) {
-        await sleep(config.batchDelayMs);
+      // Delay between parallel groups (not between every batch)
+      if (g + CONCURRENT_BATCHES < batches.length) {
+        await sleep(1000);
         throwIfCancellationRequested(jobId);
-      }
-
-      if (quotaHit && results.every((r) => r.status === 'failed')) {
-        throw new Error(
-          userFacingError(new Error(results.find((r) => r.error)?.error ?? 'API quota exceeded')),
-        );
       }
     }
 
