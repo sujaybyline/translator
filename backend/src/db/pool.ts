@@ -56,6 +56,7 @@ export async function insertJob(job: {
   error_message?: string | null;
   upload_path?: string | null;
   output_path?: string | null;
+  source_only_output_path?: string | null;
   file_size?: number | null;
 }): Promise<void> {
   if (!dbAvailable || !pool) return;
@@ -63,11 +64,11 @@ export async function insertJob(job: {
     `INSERT INTO translation_jobs
       (id, original_filename, output_filename, source_language, target_language,
        xliff_version, total_segments, translated_segments, status, error_message,
-       upload_path, output_path, file_size)
+       upload_path, output_path, source_only_output_path, file_size)
      VALUES
       (:id, :original_filename, :output_filename, :source_language, :target_language,
        :xliff_version, :total_segments, :translated_segments, :status, :error_message,
-       :upload_path, :output_path, :file_size)`,
+       :upload_path, :output_path, :source_only_output_path, :file_size)`,
     {
       id: job.id,
       original_filename: job.original_filename,
@@ -81,6 +82,7 @@ export async function insertJob(job: {
       error_message: job.error_message ?? null,
       upload_path: job.upload_path ?? null,
       output_path: job.output_path ?? null,
+      source_only_output_path: job.source_only_output_path ?? null,
       file_size: job.file_size ?? null,
     },
   );
@@ -98,6 +100,7 @@ export async function updateJob(
     status: string;
     error_message: string | null;
     output_path: string | null;
+    source_only_output_path: string | null;
     completed_at: Date | null;
   }>,
 ): Promise<void> {
@@ -112,6 +115,7 @@ export async function updateJob(
     'status',
     'error_message',
     'output_path',
+    'source_only_output_path',
     'completed_at',
   ] as const;
 

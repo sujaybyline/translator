@@ -65,6 +65,10 @@ export function getDownloadUrl(jobId: string): string {
   return `${API_BASE}/translate/${jobId}/download`;
 }
 
+export function getDownloadSourceUrl(jobId: string): string {
+  return `${API_BASE}/translate/${jobId}/download-source`;
+}
+
 export async function getHistory(): Promise<TranslationJob[]> {
   const res = await fetch(`${API_BASE}/translation-history`);
   return parseJson<TranslationJob[]>(res);

@@ -5,7 +5,7 @@ import { config } from '../config.js';
 import { parseXliff, isSupportedXliffExtension } from '../parsers/xliffParser.js';
 import { detectSourceLanguage, languageCodeToName } from './languageDetection.js';
 import { protectPlaceholders } from './placeholderProtection.js';
-import { rebuildXliff, buildOutputFilename } from './xliffRebuilder.js';
+import { rebuildXliff, rebuildXliffSourceOnly, buildOutputFilename } from './xliffRebuilder.js';
 import { validateGeneratedXliff } from '../validators/xliffValidator.js';
 import { isQuotaError, userFacingError } from '../translators/geminiTranslator.js';
 import { createConfiguredTranslator } from './appSettingsService.js';
@@ -44,6 +44,7 @@ export interface JobState {
   errorMessage: string | null;
   uploadPath: string | null;
   outputPath: string | null;
+  sourceOnlyOutputPath: string | null;
   fileSize: number | null;
   createdAt: string;
   completedAt: string | null;
@@ -77,6 +78,7 @@ async function persistJob(job: JobState): Promise<void> {
       : job.status,
     error_message: job.errorMessage,
     output_path: job.outputPath,
+    source_only_output_path: job.sourceOnlyOutputPath ?? null,
     completed_at: job.completedAt ? new Date(job.completedAt) : null,
   });
 }
@@ -114,6 +116,7 @@ export async function createJobFromUpload(file: {
     errorMessage: null,
     uploadPath: file.path,
     outputPath: null,
+    sourceOnlyOutputPath: null,
     fileSize: file.size,
     createdAt: new Date().toISOString(),
     completedAt: null,
@@ -176,6 +179,7 @@ export async function getJobAsync(jobId: string): Promise<JobState | null> {
     errorMessage: row.error_message,
     uploadPath: row.upload_path,
     outputPath: row.output_path,
+    sourceOnlyOutputPath: row.source_only_output_path ?? null,
     fileSize: row.file_size,
     createdAt: new Date(row.created_at).toISOString(),
     completedAt: row.completed_at ? new Date(row.completed_at).toISOString() : null,
@@ -215,6 +219,7 @@ export async function listHistory(): Promise<JobState[]> {
       errorMessage: row.error_message,
       uploadPath: row.upload_path,
       outputPath: row.output_path,
+      sourceOnlyOutputPath: row.source_only_output_path ?? null,
       fileSize: row.file_size,
       createdAt: new Date(row.created_at).toISOString(),
       completedAt: row.completed_at ? new Date(row.completed_at).toISOString() : null,
@@ -271,15 +276,20 @@ export async function startTranslation(
 export async function clearJob(jobId: string): Promise<boolean> {
   const job = memoryJobs.get(jobId);
   if (!job) {
+    // Job only in DB (e.g. after server restart)
     const persistedJob = await db.getJobById(jobId);
     if (!persistedJob) return false;
-    if (persistedJob.status !== 'uploaded') return false;
     await db.deleteJob(jobId);
-    await removeJobFiles(persistedJob.upload_path, persistedJob.output_path);
+    await removeJobFiles(
+      persistedJob.upload_path,
+      persistedJob.output_path,
+      persistedJob.source_only_output_path,
+    );
     return true;
   }
 
-  if (job.status !== 'uploaded' && job.status !== 'failed') {
+  // Cancel pipeline if still running — allow clearing completed/failed jobs too
+  if (job.status !== 'uploaded' && job.status !== 'failed' && job.status !== 'completed') {
     if (!pipelinePromises.has(jobId)) return false;
     cancellationRequests.add(jobId);
     pipelineControllers.get(jobId)?.abort();
@@ -287,10 +297,13 @@ export async function clearJob(jobId: string): Promise<boolean> {
   }
   const currentJob = memoryJobs.get(jobId);
   if (!currentJob) return true;
-  if (currentJob.status !== 'uploaded') return false;
   memoryJobs.delete(jobId);
   await db.deleteJob(jobId);
-  await removeJobFiles(currentJob.uploadPath, currentJob.outputPath);
+  await removeJobFiles(
+    currentJob.uploadPath,
+    currentJob.outputPath,
+    currentJob.sourceOnlyOutputPath,
+  );
   return true;
 }
 
@@ -444,8 +457,24 @@ async function runTranslationPipeline(jobId: string, signal: AbortSignal): Promi
     await backupTranslatedFile(outputPath, `${job.id}_${outputFilename}`);
     throwIfCancellationRequested(jobId);
 
+    // Build and write the source-replaced XLIFF to disk so it persists across restarts
+    const sourceOnlyContent = rebuildXliffSourceOnly({
+      rawXml: job.rawXml,
+      version: job.xliffVersion ?? '1.2',
+      translations: successful.map((r) => ({ id: r.id, translatedText: r.translatedText })),
+      targetLanguageCode: job.targetLanguage,
+    });
+    const sourceOnlyFilename = outputFilename.replace(
+      /(_[a-z]{2})(\.xlf(?:f)?)$/i,
+      '$1_source-only$2',
+    );
+    const sourceOnlyPath = path.join(config.paths.output, `${job.id}_${sourceOnlyFilename}`);
+    await fs.writeFile(sourceOnlyPath, sourceOnlyContent, 'utf8');
+    throwIfCancellationRequested(jobId);
+
     job.outputFilename = outputFilename;
     job.outputPath = outputPath;
+    job.sourceOnlyOutputPath = sourceOnlyPath;
     job.translatedSegments = successful.length;
     job.status = 'completed';
     job.progressPercent = 100;
@@ -522,6 +551,47 @@ export async function getDownloadPath(
   } catch {
     return null;
   }
+}
+
+/**
+ * Serve the source-replaced XLIFF from disk.
+ * The file is written during the pipeline and its path is persisted in the DB,
+ * so this works correctly after server restarts.
+ */
+export async function getDownloadSourceContent(
+  jobId: string,
+): Promise<{ filePath: string; filename: string } | null> {
+  const job = memoryJobs.get(jobId) ?? (await getJobAsync(jobId));
+  if (!job || job.status !== 'completed') return null;
+
+  // Primary: use the stored path
+  if (job.sourceOnlyOutputPath) {
+    try {
+      await fs.access(job.sourceOnlyOutputPath);
+      const filename = path.basename(job.sourceOnlyOutputPath).replace(/^[^_]+_/, '');
+      return { filePath: job.sourceOnlyOutputPath, filename };
+    } catch {
+      // File missing — fall through to path reconstruction below
+    }
+  }
+
+  // Fallback: reconstruct path from outputFilename convention (covers jobs translated
+  // before this feature was added, where sourceOnlyOutputPath may be null in DB)
+  if (job.outputFilename) {
+    const sourceOnlyFilename = job.outputFilename.replace(
+      /(_[a-z]{2})(\.xlf(?:f)?)$/i,
+      '$1_source-only$2',
+    );
+    const candidate = path.join(config.paths.output, `${jobId}_${sourceOnlyFilename}`);
+    try {
+      await fs.access(candidate);
+      return { filePath: candidate, filename: sourceOnlyFilename };
+    } catch {
+      return null;
+    }
+  }
+
+  return null;
 }
 
 export async function getPreview(

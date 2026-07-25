@@ -11,6 +11,7 @@ router.delete('/translate/:jobId', ctrl.clearJob);
 router.get('/translate/:jobId', ctrl.getJob);
 router.get('/translate/:jobId/preview', ctrl.getPreview);
 router.get('/translate/:jobId/download', ctrl.downloadJob);
+router.get('/translate/:jobId/download-source', ctrl.downloadJobSourceOnly);
 router.get('/translation-history', ctrl.getHistory);
 router.get('/settings', ctrl.getSettings);
 router.put('/settings', ctrl.saveSettings);

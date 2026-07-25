@@ -141,7 +141,7 @@ export function TranslatorPage() {
             clearing={clearing}
           />
           <ProgressPanel job={job} />
-          <CompletionCard job={job} />
+          <CompletionCard job={job} onClear={onClear} clearing={clearing} />
           {(job.status === 'completed' ||
             job.status === 'translating' ||
             job.translatedSegments > 0) && <PreviewTable job={job} />}

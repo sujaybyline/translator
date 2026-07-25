@@ -37,3 +37,8 @@ Thumbs.db
 # Coverage / test
 coverage/
 .nyc_output/
+
+storage
+dist
+dist.tar
+dist (2).tar

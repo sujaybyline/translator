@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS translation_jobs (
   error_message TEXT NULL,
   upload_path VARCHAR(1024) NULL,
   output_path VARCHAR(1024) NULL,
+  source_only_output_path VARCHAR(1024) NULL,
   file_size BIGINT NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   completed_at DATETIME NULL,
@@ -57,3 +58,8 @@ CREATE TABLE IF NOT EXISTS app_settings (
 ) ENGINE=InnoDB
 DEFAULT CHARSET=utf8mb4
 COLLATE=utf8mb4_unicode_ci;
+
+-- Migration: add source_only_output_path column (run once on existing databases)
+ALTER TABLE translation_jobs
+  ADD COLUMN IF NOT EXISTS source_only_output_path VARCHAR(1024) NULL
+  AFTER output_path;

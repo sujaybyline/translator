@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { getDownloadUrl, getPreview } from '../services/api';
+import { getDownloadUrl, getDownloadSourceUrl, getPreview } from '../services/api';
 import type { PreviewSegment, TranslationJob } from '../types';
 import { formatPreviewText, statusLabel } from '../utils/format';
 
@@ -161,7 +161,7 @@ export function PreviewTable({ job }: Props) {
   );
 }
 
-export function CompletionCard({ job }: { job: TranslationJob }) {
+export function CompletionCard({ job, onClear, clearing }: { job: TranslationJob; onClear?: () => void; clearing?: boolean }) {
   if (job.status !== 'completed') return null;
 
   return (
@@ -182,12 +182,31 @@ export function CompletionCard({ job }: { job: TranslationJob }) {
         <Row label="Validation status" value="Passed" />
         <Row label="Output file" value={job.outputFilename ?? '—'} />
       </dl>
-      <a
-        href={getDownloadUrl(job.id)}
-        className="mt-6 inline-flex rounded-xl bg-[var(--color-brand)] px-5 py-3 text-sm font-semibold text-white no-underline transition hover:bg-[var(--color-brand-light)]"
-      >
-        Download {job.targetLanguageName} XLIFF
-      </a>
+      <div className="mt-6 flex flex-wrap items-center gap-3">
+        <a
+          href={getDownloadUrl(job.id)}
+          className="inline-flex rounded-xl bg-[var(--color-brand)] px-5 py-3 text-sm font-semibold text-white no-underline transition hover:bg-[var(--color-brand-light)]"
+        >
+          Download {job.targetLanguageName} XLIFF
+        </a>
+        <a
+          href={getDownloadSourceUrl(job.id)}
+          title="Downloads the original XLIFF with source text replaced by the translation — no target elements"
+          className="inline-flex rounded-xl border border-[var(--color-brand)] px-5 py-3 text-sm font-semibold text-[var(--color-brand)] no-underline transition hover:bg-[color-mix(in_oklab,var(--color-brand)_8%,white)]"
+        >
+          Download Source-Replaced XLIFF
+        </a>
+        {onClear && (
+          <button
+            type="button"
+            onClick={onClear}
+            disabled={clearing}
+            className="inline-flex rounded-xl border border-[var(--color-line)] px-5 py-3 text-sm font-semibold text-[var(--color-ink-soft)] transition hover:bg-[var(--color-paper)] disabled:opacity-60"
+          >
+            {clearing ? 'Clearing…' : 'Start New Translation'}
+          </button>
+        )}
+      </div>
     </div>
   );
 }

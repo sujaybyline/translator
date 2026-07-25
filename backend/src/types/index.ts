@@ -90,6 +90,7 @@ export interface TranslationJobRecord {
   error_message: string | null;
   upload_path: string | null;
   output_path: string | null;
+  source_only_output_path: string | null;
   file_size: number | null;
   created_at: Date;
   completed_at: Date | null;

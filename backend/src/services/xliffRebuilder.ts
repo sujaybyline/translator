@@ -173,6 +173,130 @@ function applyXliff20(xml: string, translations: Map<string, string>): string {
   );
 }
 
+/**
+ * Replace <source> content with translated text for XLIFF 1.2.
+ * Strips any existing <target> elements and removes source-language attribute.
+ */
+function applyXliff12SourceOnly(xml: string, translations: Map<string, string>): string {
+  return xml.replace(
+    /<trans-unit\b([^>]*)>([\s\S]*?)<\/trans-unit>/gi,
+    (full, attrs: string, inner: string) => {
+      const idMatch = attrs.match(/\bid\s*=\s*(["'])([^"']*)\1/i);
+      const id = idMatch?.[2];
+      if (!id || !translations.has(id)) return full;
+
+      const translated = escapeXmlText(translations.get(id)!);
+
+      // Replace source content, strip target
+      let newInner = inner
+        // Replace content inside <source>...</source>, preserving the element
+        .replace(
+          /<source\b([^>]*)>([\s\S]*?)<\/source>/i,
+          (_m, sAttrs: string) => `<source${sAttrs}>${translated}</source>`,
+        )
+        // Remove any existing target element
+        .replace(/\s*<target\b[\s\S]*?<\/target>/gi, '')
+        .replace(/\s*<target\b[^>]*\/>/gi, '');
+
+      return `<trans-unit${attrs}>${newInner}</trans-unit>`;
+    },
+  );
+}
+
+/**
+ * Replace <source> content with translated text for XLIFF 2.0.
+ * Strips any existing <target> elements.
+ */
+function applyXliff20SourceOnly(xml: string, translations: Map<string, string>): string {
+  return xml.replace(
+    /<unit\b([^>]*)>([\s\S]*?)<\/unit>/gi,
+    (unitFull, unitAttrs: string, unitInner: string) => {
+      const unitIdMatch = unitAttrs.match(/\bid\s*=\s*(["'])([^"']*)\1/i);
+      const unitId = unitIdMatch?.[2] ?? '';
+
+      const newUnitInner = unitInner.replace(
+        /<segment\b([^>]*)>([\s\S]*?)<\/segment>/gi,
+        (segFull, segAttrs: string, segInner: string) => {
+          const segIdMatch = segAttrs.match(/\bid\s*=\s*(["'])([^"']*)\1/i);
+          const segId = segIdMatch?.[2];
+          const candidates = [segId, unitId, segId ? `${unitId}-${segId}` : undefined].filter(
+            Boolean,
+          ) as string[];
+
+          let translated: string | undefined;
+          for (const c of candidates) {
+            if (translations.has(c)) {
+              translated = translations.get(c);
+              break;
+            }
+          }
+          if (translated == null && segId) {
+            for (const [key, value] of translations) {
+              if (key === segId || key.endsWith(`:${segId}`) || key.endsWith(`-${segId}`)) {
+                translated = value;
+                break;
+              }
+            }
+          }
+          if (translated == null) return segFull;
+
+          const escaped = escapeXmlText(translated);
+
+          let newSegInner = segInner
+            .replace(
+              /<source\b([^>]*)>([\s\S]*?)<\/source>/i,
+              (_m, sAttrs: string) => `<source${sAttrs}>${escaped}</source>`,
+            )
+            .replace(/\s*<target\b[\s\S]*?<\/target>/gi, '')
+            .replace(/\s*<target\b[^>]*\/>/gi, '');
+
+          return `<segment${segAttrs}>${newSegInner}</segment>`;
+        },
+      );
+
+      return `<unit${unitAttrs}>${newUnitInner}</unit>`;
+    },
+  );
+}
+
+/**
+ * Rebuild XLIFF by replacing <source> content with translations directly.
+ * No <target> elements are added — the source text becomes the translated text.
+ * The source-language attribute is updated to the target language code.
+ */
+export function rebuildXliffSourceOnly(options: {
+  rawXml: string;
+  version: XliffVersion;
+  translations: SegmentTranslation[];
+  targetLanguageCode?: string;
+}): string {
+  const { rawXml, version, translations, targetLanguageCode = 'de' } = options;
+  const map = new Map(translations.map((t) => [t.id, t.translatedText]));
+
+  let result =
+    version === '2.0'
+      ? applyXliff20SourceOnly(rawXml, map)
+      : applyXliff12SourceOnly(rawXml, map);
+
+  // Update source-language to target language (since source now holds translated text)
+  // and remove any target-language attribute to keep it clean
+  if (version === '2.0') {
+    result = result.replace(
+      /\bsrcLang\s*=\s*(["'])[^"']*\1/i,
+      `srcLang=$1${targetLanguageCode}$1`,
+    );
+    result = result.replace(/\s*\btrgLang\s*=\s*(["'])[^"']*\1/gi, '');
+  } else {
+    result = result.replace(
+      /\bsource-language\s*=\s*(["'])[^"']*\1/gi,
+      `source-language=$1${targetLanguageCode}$1`,
+    );
+    result = result.replace(/\s*\btarget-language\s*=\s*(["'])[^"']*\1/gi, '');
+  }
+
+  return result;
+}
+
 export function rebuildXliff(options: {
   rawXml: string;
   version: XliffVersion;

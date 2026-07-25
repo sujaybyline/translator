@@ -93,6 +93,25 @@ export async function downloadJob(req: Request, res: Response, next: NextFunctio
   }
 }
 
+export async function downloadJobSourceOnly(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const result = await jobService.getDownloadSourceContent(req.params.jobId);
+    if (!result) {
+      throw new AppError(
+        'Source-only download is not available. The job may not be completed or the file has been removed.',
+        404,
+      );
+    }
+    res.download(result.filePath, result.filename);
+  } catch (err) {
+    next(err);
+  }
+}
+
 export async function getHistory(_req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const history = await jobService.listHistory();

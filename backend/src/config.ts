@@ -3,12 +3,15 @@ import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-// backend/src or backend/dist → project root (translator/) is one level up from backend/
+// config.ts lives at backend/src/ (or backend/dist/src/ if compiled)
+// so backendRoot is always one level up from __dirname
 const backendRoot = path.resolve(__dirname, '..');
 const projectRoot = path.resolve(backendRoot, '..');
 
-dotenv.config({ path: path.resolve(projectRoot, '.env') });
+// Primary: backend/.env — co-located with the server, used in production
+// Fallback: project root .env — dev mono-repo convenience
 dotenv.config({ path: path.resolve(backendRoot, '.env') });
+dotenv.config({ path: path.resolve(projectRoot, '.env') });
 
 function intEnv(name: string, fallback: number): number {
   const raw = process.env[name];
