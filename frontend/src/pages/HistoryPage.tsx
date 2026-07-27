@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Download, FileX2 } from 'lucide-react';
-import { getDownloadUrl, getDownloadSourceUrl, getHistory } from '../services/api';
+import { getDownloadSourceUrl, getHistory } from '../services/api';
 import type { TranslationJob } from '../types';
 import { formatDate, statusLabel } from '../utils/format';
 
