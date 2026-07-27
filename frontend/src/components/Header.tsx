@@ -3,6 +3,7 @@ import { NavLink } from 'react-router-dom';
 const links = [
   { to: '/', label: 'Translator', end: true },
   { to: '/history', label: 'History', end: false },
+  { to: '/qa', label: 'QA Review', end: false },
   { to: '/settings', label: 'Settings', end: false },
 ];
 

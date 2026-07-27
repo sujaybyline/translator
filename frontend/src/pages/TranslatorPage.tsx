@@ -60,7 +60,11 @@ export function TranslatorPage() {
     setClearing(true);
     setError(null);
     try {
-      await clearJob(job.id);
+      // Only delete from database if job is not completed
+      // Completed jobs should remain in history for download
+      if (job.status !== 'completed') {
+        await clearJob(job.id);
+      }
       setJobId(null);
       setLocalJob(null);
     } catch (err) {
@@ -136,7 +140,10 @@ export function TranslatorPage() {
           <FileMetaCard job={job} onStart={onStart} onClear={onClear} starting={starting} clearing={clearing} />
           <ProgressPanel job={job} />
           <CompletionCard job={job} onClear={onClear} clearing={clearing} />
-          {(job.status === 'completed' || job.status === 'translating' || job.translatedSegments > 0) && (
+          {(job.status === 'uploaded' ||
+            job.status === 'completed' ||
+            job.status === 'translating' ||
+            job.translatedSegments > 0) && (
             <PreviewTable job={job} />
           )}
         </div>

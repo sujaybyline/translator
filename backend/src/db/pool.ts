@@ -210,6 +210,20 @@ export async function getSegmentsByJobId(
   );
   return rows as TranslationSegmentRecord[];
 }
+
+export async function updateSegmentTranslation(
+  jobId: string,
+  segmentId: string,
+  translation: string,
+): Promise<void> {
+  if (!dbAvailable || !pool) return;
+  await pool.execute(
+    `UPDATE translation_segments
+     SET translated_text = :translation, status = 'pending', validation_status = 'pending'
+     WHERE translation_job_id = :jobId AND segment_identifier = :segmentId`,
+    { jobId, segmentId, translation },
+  );
+}
 export interface AppSettingsRecord {
   provider: 'gemini' | 'anthropic';
   model: string;
@@ -226,6 +240,152 @@ export async function getAppSettings(): Promise<AppSettingsRecord | null> {
   );
 
   return (rows[0] as AppSettingsRecord) ?? null;
+}
+
+// QA validation jobs
+export interface QAJobRecord {
+  id: string;
+  mode: 'compare' | 'review';
+  source_filename: string | null;
+  translated_filename: string | null;
+  review_filename: string | null;
+  target_language: string;
+  total_segments: number;
+  reviewed_segments: number;
+  status: string;
+  error_message: string | null;
+  created_at: Date;
+  completed_at: Date | null;
+}
+
+export interface QASegmentRecord {
+  id: number;
+  qa_job_id: string;
+  segment_id: string;
+  source_text: string | null;
+  translated_text: string | null;
+  status: 'ok' | 'warning' | 'error' | 'missing';
+  suggestion: string | null;
+  created_at: Date;
+}
+
+export async function createQAJob(job: {
+  id: string;
+  mode: 'compare' | 'review';
+  source_filename?: string;
+  translated_filename?: string;
+  review_filename?: string;
+  target_language: string;
+  total_segments: number;
+}): Promise<void> {
+  if (!dbAvailable || !pool) return;
+  await pool.execute(
+    `INSERT INTO qa_validation_jobs
+       (id, mode, source_filename, translated_filename, review_filename, target_language, total_segments, reviewed_segments, status)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 0, 'running')`,
+    [
+      job.id,
+      job.mode,
+      job.source_filename || null,
+      job.translated_filename || null,
+      job.review_filename || null,
+      job.target_language,
+      job.total_segments,
+    ],
+  );
+}
+
+export async function updateQAJobProgress(
+  qaJobId: string,
+  reviewedSegments: number,
+  status: string = 'running',
+): Promise<void> {
+  if (!dbAvailable || !pool) return;
+  const completedAt = status === 'completed' ? new Date() : null;
+  const [result] = await pool.execute<ResultSetHeader>(
+    `UPDATE qa_validation_jobs
+     SET reviewed_segments = ?, status = ?, completed_at = ?
+     WHERE id = ?`,
+    [reviewedSegments, status, completedAt, qaJobId],
+  );
+  // Log if update didn't affect any rows (job might not exist)
+  if (result.affectedRows === 0) {
+    console.warn(`QA job ${qaJobId} not found or already deleted during progress update`);
+  }
+}
+
+export async function insertQASegments(
+  qaJobId: string,
+  segments: Array<{
+    segment_id: string;
+    source_text: string | null;
+    translated_text: string | null;
+    status: 'ok' | 'warning' | 'error' | 'missing';
+    suggestion: string | null;
+  }>,
+): Promise<void> {
+  if (!dbAvailable || !pool) return;
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    for (const seg of segments) {
+      await conn.execute(
+        `INSERT INTO qa_validation_segments
+           (qa_job_id, segment_id, source_text, translated_text, status, suggestion)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [qaJobId, seg.segment_id, seg.source_text, seg.translated_text, seg.status, seg.suggestion],
+      );
+    }
+    await conn.commit();
+  } catch (err) {
+    await conn.rollback();
+    throw err;
+  } finally {
+    conn.release();
+  }
+}
+
+export async function getQAJob(qaJobId: string): Promise<QAJobRecord | null> {
+  if (!dbAvailable || !pool) return null;
+  const [rows] = await pool.execute<RowDataPacket[]>(
+    `SELECT * FROM qa_validation_jobs WHERE id = ?`,
+    [qaJobId],
+  );
+  return (rows[0] as QAJobRecord) ?? null;
+}
+
+export async function getQASegments(qaJobId: string): Promise<QASegmentRecord[]> {
+  if (!dbAvailable || !pool) return [];
+  const [rows] = await pool.execute<RowDataPacket[]>(
+    `SELECT * FROM qa_validation_segments WHERE qa_job_id = ? ORDER BY id ASC`,
+    [qaJobId],
+  );
+  return rows as QASegmentRecord[];
+}
+
+export async function getRunningQAJobs(): Promise<QAJobRecord[]> {
+  if (!dbAvailable || !pool) return [];
+  const [rows] = await pool.execute<RowDataPacket[]>(
+    `SELECT * FROM qa_validation_jobs WHERE status = 'running' ORDER BY created_at DESC`,
+  );
+  return rows as QAJobRecord[];
+}
+
+export async function cancelAllRunningQAJobs(): Promise<void> {
+  if (!dbAvailable || !pool) return;
+  await pool.execute<ResultSetHeader>(
+    `UPDATE qa_validation_jobs SET status = 'cancelled' WHERE status = 'running'`,
+  );
+}
+
+export async function pingDatabase(): Promise<boolean> {
+  if (!dbAvailable || !pool) return false;
+  try {
+    await pool.query('SELECT 1');
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export async function saveAppSettings(settings: {
@@ -247,16 +407,12 @@ export async function saveAppSettings(settings: {
   if (apiKey) {
     await pool.execute(
       `INSERT INTO app_settings (id, provider, model, api_key)
-       VALUES (1, :provider, :model, :api_key)
+       VALUES (1, ?, ?, ?)
        ON DUPLICATE KEY UPDATE
          provider = VALUES(provider),
          model = VALUES(model),
          api_key = VALUES(api_key)`,
-      {
-        provider: settings.provider,
-        model: settings.model,
-        api_key: apiKey,
-      },
+      [settings.provider, settings.model, apiKey],
     );
     return;
   }
@@ -267,24 +423,10 @@ export async function saveAppSettings(settings: {
 
   await pool.execute(
     `UPDATE app_settings
-     SET provider = :provider, model = :model
+     SET provider = ?, model = ?
      WHERE id = 1`,
-    {
-      provider: settings.provider,
-      model: settings.model,
-    },
+    [settings.provider, settings.model],
   );
-}
-
-
-export async function pingDatabase(): Promise<boolean> {
-  if (!dbAvailable || !pool) return false;
-  try {
-    await pool.query('SELECT 1');
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 // Satisfy unused import lint if ResultSetHeader unused

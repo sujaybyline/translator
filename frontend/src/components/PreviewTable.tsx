@@ -1,11 +1,103 @@
-import { Search, Download, CheckCircle2, X, ArrowLeft, ArrowRight } from 'lucide-react';
-import { useEffect, useState } from 'react';
-import { getDownloadUrl, getDownloadSourceUrl, getPreview } from '../services/api';
+import { Search, Download, CheckCircle2, X, ArrowLeft, ArrowRight, Pencil, Check as CheckIcon } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { getDownloadSourceUrl, getPreview, updateSegmentTranslation } from '../services/api';
 import type { PreviewSegment, TranslationJob } from '../types';
 import { formatPreviewText, statusLabel } from '../utils/format';
 
 interface Props {
   job: TranslationJob;
+}
+
+// Editable cell — edit raw XML/XLIFF directly, preserving all tags
+function EditableCell({
+  value,
+  placeholder,
+  editable,
+  onChange,
+}: {
+  value: string;
+  placeholder?: string;
+  editable: boolean;
+  onChange: (v: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // sync draft when value changes from outside (new translation arrived)
+  useEffect(() => {
+    if (!editing) setDraft(value);
+  }, [value, editing]);
+
+  const commit = () => {
+    setEditing(false);
+    if (draft !== value) onChange(draft);
+  };
+
+  const startEditing = () => {
+    setDraft(value);
+    setEditing(true);
+  };
+
+  if (!editable) {
+    return (
+      <span className="text-[var(--color-ink)] leading-relaxed">
+        {formatPreviewText(value) || <span className="text-[var(--color-ink-soft)]/50 italic text-xs">—</span>}
+      </span>
+    );
+  }
+
+  if (editing) {
+    return (
+      <div className="flex flex-col gap-1.5">
+        <textarea
+          ref={textareaRef}
+          value={draft}
+          autoFocus
+          rows={3}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); commit(); }
+            if (e.key === 'Escape') { setEditing(false); setDraft(value); }
+          }}
+          className="w-full rounded-lg border border-[var(--color-brand)]/50 bg-white px-2.5 py-1.5 text-sm text-[var(--color-ink)] leading-relaxed outline-none ring-2 ring-[var(--color-brand)]/20 resize-none font-mono"
+        />
+        <div className="flex gap-1.5">
+          <button
+            type="button"
+            onClick={commit}
+            className="inline-flex items-center gap-1 rounded-md bg-[var(--color-brand)] px-2 py-1 text-xs font-semibold text-white transition hover:bg-[var(--color-brand-light)]"
+          >
+            <CheckIcon size={11} /> Save
+          </button>
+          <button
+            type="button"
+            onClick={() => { setEditing(false); setDraft(value); }}
+            className="inline-flex items-center gap-1 rounded-md border border-[var(--color-line)] px-2 py-1 text-xs font-semibold text-[var(--color-ink-soft)] transition hover:bg-[var(--color-paper)]"
+          >
+            <X size={11} /> Cancel
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className="group relative cursor-text rounded-lg px-2.5 py-1.5 -mx-2.5 -my-1.5 hover:bg-[color-mix(in_oklab,var(--color-brand)_5%,white)] transition-colors"
+      onClick={startEditing}
+      title="Click to edit"
+    >
+      <span className="text-[var(--color-ink)] leading-relaxed">
+        {formatPreviewText(value) || <span className="text-[var(--color-ink-soft)]/50 italic text-xs">{placeholder ?? 'pending…'}</span>}
+      </span>
+      <Pencil
+        size={11}
+        className="absolute right-1.5 top-1.5 opacity-0 group-hover:opacity-60 text-[var(--color-brand)] transition-opacity"
+        aria-hidden
+      />
+    </div>
+  );
 }
 
 export function PreviewTable({ job }: Props) {
@@ -16,11 +108,15 @@ export function PreviewTable({ job }: Props) {
   const [loading, setLoading] = useState(false);
   const pageSize = 10;
 
+  const isUploaded = job.status === 'uploaded';
+  const isActive =
+    job.status !== 'completed' && job.status !== 'failed' && job.status !== 'uploaded';
+  const isCompleted = job.status === 'completed';
+
   useEffect(() => {
     let cancelled = false;
-    const isActive =
-      job.status !== 'completed' && job.status !== 'failed' && job.status !== 'uploaded';
 
+    // While actively translating: use live segments from job poll
     if (isActive && job.segments && job.segments.length > 0) {
       let rows = job.segments;
       if (q.trim()) {
@@ -39,6 +135,7 @@ export function PreviewTable({ job }: Props) {
       return;
     }
 
+    // For uploaded + completed + failed: fetch from preview API
     const load = async () => {
       setLoading(true);
       try {
@@ -57,19 +154,40 @@ export function PreviewTable({ job }: Props) {
     };
     void load();
     return () => { cancelled = true; };
-  }, [job.id, job.status, job.segments, q, page]);
+  }, [job.id, job.status, job.segments, q, page, isActive]);
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
+  const handleTranslationEdit = async (segmentId: string, newValue: string) => {
+    // Persist the edit to backend first
+    try {
+      await updateSegmentTranslation(job.id, segmentId, newValue);
+      
+      // Update local segments immediately after successful save
+      setSegments((prev) =>
+        prev.map((seg) =>
+          seg.segmentId === segmentId
+            ? { ...seg, translation: newValue, status: 'pending', validationStatus: 'pending' }
+            : seg,
+        ),
+      );
+    } catch (err) {
+      console.error('Failed to save translation edit:', err);
+    }
+  };
+
   return (
     <div className="rounded-2xl border border-[var(--color-line)] bg-white/90 shadow-sm overflow-hidden">
+      {/* Header */}
       <div className="border-b border-[var(--color-line)]/60 px-6 py-4 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h3 className="font-[family-name:var(--font-display)] text-xl text-[var(--color-brand)]">
-            Translation Preview
+            {isUploaded ? 'Source Segments' : 'Translation Preview'}
           </h3>
           <p className="mt-0.5 text-xs text-[var(--color-ink-soft)]">
-            {job.targetLanguageName} translations alongside source segments
+            {isUploaded
+              ? `${job.totalSegments} segments ready — start translation to fill the right column`
+              : `${job.targetLanguageName} translations alongside source segments${isCompleted ? ' · click any translation to edit' : ''}`}
           </p>
         </div>
         <div className="relative">
@@ -83,61 +201,107 @@ export function PreviewTable({ job }: Props) {
         </div>
       </div>
 
+      {/* Table */}
       <div className="overflow-x-auto">
         <table className="min-w-full border-collapse text-left text-sm">
           <thead>
             <tr className="bg-[var(--color-paper)]/60 text-xs uppercase tracking-wider text-[var(--color-ink-soft)]">
-              <th className="px-4 py-3 font-semibold w-24">ID</th>
-              <th className="px-4 py-3 font-semibold">Original</th>
-              <th className="px-4 py-3 font-semibold">{job.targetLanguageName}</th>
-              <th className="px-4 py-3 font-semibold w-28">Status</th>
+              <th className="px-4 py-3 font-semibold w-20">ID</th>
+              <th className="px-4 py-3 font-semibold w-[44%]">Source</th>
+              <th className="px-4 py-3 font-semibold w-[44%]">
+                <span className="flex items-center gap-1.5">
+                  {isUploaded ? (
+                    <span className="italic text-[var(--color-ink-soft)]/60 normal-case font-normal">
+                      translation will appear here
+                    </span>
+                  ) : (
+                    <>
+                      {job.targetLanguageName}
+                      {isCompleted && (
+                        <span className="ml-1 inline-flex items-center gap-0.5 rounded-full bg-[color-mix(in_oklab,var(--color-brand)_10%,white)] px-2 py-0.5 text-[10px] font-semibold text-[var(--color-brand)] normal-case">
+                          <Pencil size={9} aria-hidden /> editable
+                        </span>
+                      )}
+                    </>
+                  )}
+                </span>
+              </th>
+              {!isUploaded && <th className="px-4 py-3 font-semibold w-24">Status</th>}
             </tr>
           </thead>
           <tbody className="divide-y divide-[var(--color-line)]/50">
             {loading && (
               <tr>
-                <td colSpan={4} className="px-4 py-10 text-center text-sm text-[var(--color-ink-soft)]">
+                <td colSpan={isUploaded ? 3 : 4} className="px-4 py-10 text-center text-sm text-[var(--color-ink-soft)]">
                   <span className="inline-flex items-center gap-2">
                     <span className="h-4 w-4 animate-spin rounded-full border-2 border-[var(--color-brand)]/30 border-t-[var(--color-brand)]" />
-                    Loading preview…
+                    Loading segments…
                   </span>
                 </td>
               </tr>
             )}
             {!loading && segments.length === 0 && (
               <tr>
-                <td colSpan={4} className="px-4 py-10 text-center text-sm text-[var(--color-ink-soft)]">
+                <td colSpan={isUploaded ? 3 : 4} className="px-4 py-10 text-center text-sm text-[var(--color-ink-soft)]">
                   No segments to display.
                 </td>
               </tr>
             )}
-            {!loading && segments.map((seg, idx) => (
-              <tr
-                key={seg.segmentId}
-                className={[
-                  'align-top transition-colors',
-                  idx % 2 === 0 ? 'bg-white' : 'bg-[var(--color-paper)]/40',
-                  'hover:bg-[color-mix(in_oklab,var(--color-brand)_3%,white)]',
-                ].join(' ')}
-              >
-                <td className="px-4 py-3.5 font-mono text-xs text-[var(--color-brand)] align-middle">
-                  {seg.segmentId}
-                </td>
-                <td className="max-w-xs px-4 py-3.5 text-[var(--color-ink)] leading-relaxed">
-                  {formatPreviewText(seg.original) || <span className="text-[var(--color-ink-soft)]">—</span>}
-                </td>
-                <td className="max-w-xs px-4 py-3.5 text-[var(--color-ink)] leading-relaxed">
-                  {formatPreviewText(seg.translation) || <span className="text-[var(--color-ink-soft)]/50 italic text-xs">pending…</span>}
-                </td>
-                <td className="px-4 py-3.5 align-middle">
-                  <StatusPill status={seg.validationStatus || seg.status} />
-                </td>
-              </tr>
-            ))}
+            {!loading && segments.map((seg, idx) => {
+              const translationValue = seg.translation;
+              return (
+                <tr
+                  key={seg.segmentId}
+                  className={[
+                    'align-top transition-colors',
+                    idx % 2 === 0 ? 'bg-white' : 'bg-[var(--color-paper)]/30',
+                    'hover:bg-[color-mix(in_oklab,var(--color-brand)_2%,white)]',
+                  ].join(' ')}
+                >
+                  {/* ID */}
+                  <td className="px-4 py-3.5 font-mono text-xs text-[var(--color-brand)] align-top pt-4">
+                    {seg.segmentId}
+                  </td>
+
+                  {/* Source — always read-only */}
+                  <td className="px-4 py-3.5 text-[var(--color-ink)] leading-relaxed align-top">
+                    <EditableCell
+                      value={seg.original}
+                      editable={false}
+                      onChange={() => undefined}
+                    />
+                  </td>
+
+                  {/* Translation — empty placeholder when uploaded, editable when completed */}
+                  <td className="px-4 py-3.5 align-top">
+                    {isUploaded ? (
+                      <span className="block rounded-lg bg-[var(--color-paper)]/60 px-2.5 py-1.5 text-xs text-[var(--color-ink-soft)]/40 italic min-h-[2rem]">
+                        —
+                      </span>
+                    ) : (
+                      <EditableCell
+                        value={translationValue}
+                        placeholder={isActive ? 'translating…' : 'pending'}
+                        editable={isCompleted}
+                        onChange={(v) => handleTranslationEdit(seg.segmentId, v)}
+                      />
+                    )}
+                  </td>
+
+                  {/* Status — hidden when just uploaded */}
+                  {!isUploaded && (
+                    <td className="px-4 py-3.5 align-top pt-4">
+                      <StatusPill status={seg.validationStatus || seg.status} />
+                    </td>
+                  )}
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
 
+      {/* Footer pagination */}
       <div className="border-t border-[var(--color-line)]/60 px-6 py-3 flex items-center justify-between gap-3 text-sm text-[var(--color-ink-soft)] bg-[var(--color-paper)]/40">
         <span className="text-xs">
           Page <span className="font-semibold text-[var(--color-ink)]">{page}</span> of {totalPages} · {total} segments
@@ -203,21 +367,21 @@ export function CompletionCard({
         </dl>
 
         <div className="mt-6 flex flex-wrap items-center gap-2.5">
-          <a
+          {/* <a
             href={getDownloadUrl(job.id)}
             className="inline-flex items-center gap-2 rounded-xl bg-[var(--color-brand)] px-5 py-2.5 text-sm font-semibold text-white no-underline shadow-sm transition-all hover:bg-[var(--color-brand-light)] hover:shadow-md active:scale-95"
           >
             <Download size={15} aria-hidden />
             Download {job.targetLanguageName} XLIFF
-          </a>
+          </a> */}
 
           <a
             href={getDownloadSourceUrl(job.id)}
             title="XLIFF with translated text written into source elements — no target elements"
-            className="inline-flex items-center gap-2 rounded-xl border border-[var(--color-brand)] px-5 py-2.5 text-sm font-semibold text-[var(--color-brand)] no-underline transition-all hover:bg-[color-mix(in_oklab,var(--color-brand)_6%,white)] active:scale-95"
+             className="inline-flex items-center gap-2 rounded-xl bg-[var(--color-brand)] px-5 py-2.5 text-sm font-semibold text-white no-underline shadow-sm transition-all hover:bg-[var(--color-brand-light)] hover:shadow-md active:scale-95"
           >
             <Download size={15} aria-hidden />
-            Source-Replaced XLIFF
+            Download {job.targetLanguageName} XLIFF
           </a>
 
           {onClear && (

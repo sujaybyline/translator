@@ -4,6 +4,7 @@ import type {
   PreviewResponse,
   SaveAppSettingsInput,
   TranslationJob,
+  QASegmentResult,
 } from '../types';
 
 const API_BASE = import.meta.env.VITE_API_URL ?? '/api';
@@ -97,5 +98,55 @@ export async function saveSettings(input: SaveAppSettingsInput): Promise<void> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
   });
+  await parseJson<null>(res);
+}
+
+export async function updateSegmentTranslation(
+  jobId: string,
+  segmentId: string,
+  translation: string,
+): Promise<void> {
+  const res = await fetch(`${API_BASE}/translate/${jobId}/segment`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ segmentId, translation }),
+  });
+  await parseJson<null>(res);
+}
+
+export interface RunningQAJob {
+  id: string;
+  mode: 'compare' | 'review';
+  source_filename: string | null;
+  translated_filename: string | null;
+  review_filename: string | null;
+  target_language: string;
+  total_segments: number;
+  reviewed_segments: number;
+  status: string;
+  error_message: string | null;
+  created_at: Date;
+  completed_at: Date | null;
+  segments: QASegmentResult[];
+}
+
+export async function getRunningQAJobs(): Promise<RunningQAJob[]> {
+  const res = await fetch(`${API_BASE}/qa/running`);
+  const body = await res.json() as { success: boolean; jobs: RunningQAJob[] };
+  
+  if (!res.ok || !body.success) {
+    return [];
+  }
+  
+  // Safely handle cases where body.jobs might be undefined
+  if (!Array.isArray(body.jobs)) {
+    return [];
+  }
+  
+  return body.jobs;
+}
+
+export async function cancelQAJob(jobId: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/qa/${jobId}`, { method: 'DELETE' });
   await parseJson<null>(res);
 }

@@ -478,10 +478,7 @@ async function runTranslationPipeline(jobId: string, signal: AbortSignal): Promi
       translations: successful.map((r) => ({ id: r.id, translatedText: r.translatedText })),
       targetLanguageCode: job.targetLanguage,
     });
-    const sourceOnlyFilename = outputFilename.replace(
-      /(_[a-z]{2})(\.xlf(?:f)?)$/i,
-      '$1_source-only$2',
-    );
+    const sourceOnlyFilename = `${job.sourceLanguageName}_to_${job.targetLanguageName}.xliff`;
     const sourceOnlyPath = path.join(config.paths.output, `${job.id}_${sourceOnlyFilename}`);
     await fs.writeFile(sourceOnlyPath, sourceOnlyContent, 'utf8');
     throwIfCancellationRequested(jobId);
@@ -592,10 +589,7 @@ export async function getDownloadSourceContent(
   // Fallback: reconstruct path from outputFilename convention (covers jobs translated
   // before this feature was added, where sourceOnlyOutputPath may be null in DB)
   if (job.outputFilename) {
-    const sourceOnlyFilename = job.outputFilename.replace(
-      /(_[a-z]{2})(\.xlf(?:f)?)$/i,
-      '$1_source-only$2',
-    );
+    const sourceOnlyFilename = `${job.sourceLanguageName}_to_${job.targetLanguageName}.xliff`;
     const candidate = path.join(config.paths.output, `${jobId}_${sourceOnlyFilename}`);
     try {
       await fs.access(candidate);
@@ -621,7 +615,9 @@ export async function getPreview(
   if (!job) throw new Error('Job not found');
 
   let segments = job.segments;
-  if ((!segments || segments.length === 0) && db.isDatabaseAvailable()) {
+  
+  // Always fetch from database if available to get latest edits
+  if (db.isDatabaseAvailable()) {
     const rows = await db.getSegmentsByJobId(jobId);
     segments = rows.map((s) => ({
       segmentId: s.segment_identifier,
@@ -653,4 +649,77 @@ export async function getPreview(
     page,
     pageSize,
   };
+}
+
+export async function updateSegmentTranslation(
+  jobId: string,
+  segmentId: string,
+  newTranslation: string,
+): Promise<PreviewSegment | null> {
+  // Update in DB first
+  if (db.isDatabaseAvailable()) {
+    await db.updateSegmentTranslation(jobId, segmentId, newTranslation);
+  }
+
+  const job = memoryJobs.get(jobId);
+  if (!job) {
+    // Job not in memory - load from DB and return updated segment
+    const dbJob = await db.getJobById(jobId);
+    if (!dbJob) return null;
+    
+    const rows = await db.getSegmentsByJobId(jobId);
+    const updated = rows.find((s) => s.segment_identifier === segmentId);
+    if (!updated) return null;
+    
+    return {
+      segmentId: updated.segment_identifier,
+      original: updated.source_text,
+      translation: newTranslation,
+      status: 'pending',
+      validationStatus: 'pending',
+    };
+  }
+
+  // Update in memory
+  const segment = job.segments.find((s) => s.segmentId === segmentId);
+  if (!segment) return null;
+
+  segment.translation = newTranslation;
+  segment.status = 'pending';
+  segment.validationStatus = 'pending';
+
+  // Rebuild output file with updated translations
+  if (job.status === 'completed' && job.rawXml && job.parseSegments && job.outputFilename) {
+    try {
+      const translations = job.segments.map((s) => ({
+        id: s.segmentId,
+        translatedText: s.translation,
+      }));
+
+      const rebuilt = rebuildXliff({
+        rawXml: job.rawXml,
+        version: job.xliffVersion ?? '1.2',
+        translations,
+        targetLanguageCode: job.targetLanguage,
+      });
+
+      const outputPath = path.join(config.paths.output, `${job.id}_${job.outputFilename}`);
+      await fs.writeFile(outputPath, rebuilt, 'utf8');
+
+      // Also rebuild source-only version
+      const sourceOnlyContent = rebuildXliffSourceOnly({
+        rawXml: job.rawXml,
+        version: job.xliffVersion ?? '1.2',
+        translations,
+        targetLanguageCode: job.targetLanguage,
+      });
+      const sourceOnlyFilename = `${job.sourceLanguageName}_to_${job.targetLanguageName}.xliff`;
+      const sourceOnlyPath = path.join(config.paths.output, `${job.id}_${sourceOnlyFilename}`);
+      await fs.writeFile(sourceOnlyPath, sourceOnlyContent, 'utf8');
+    } catch (err) {
+      console.error('Failed to rebuild output file after edit:', err);
+    }
+  }
+
+  return segment;
 }

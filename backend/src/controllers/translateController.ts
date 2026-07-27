@@ -112,6 +112,30 @@ export async function downloadJobSourceOnly(
   }
 }
 
+export async function updateSegment(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const { segmentId, translation } = req.body as {
+      segmentId?: string;
+      translation?: string;
+    };
+    
+    if (!segmentId) throw new AppError('segmentId is required.', 400);
+    if (typeof translation !== 'string') throw new AppError('translation is required.', 400);
+    
+    const updated = await jobService.updateSegmentTranslation(req.params.jobId, segmentId, translation);
+    if (!updated) {
+      throw new AppError('Segment or job not found.', 404);
+    }
+    res.json({ success: true, data: updated });
+  } catch (err) {
+    next(err);
+  }
+}
+
 export async function getHistory(_req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const history = await jobService.listHistory();

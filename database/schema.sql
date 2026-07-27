@@ -63,3 +63,43 @@ COLLATE=utf8mb4_unicode_ci;
 ALTER TABLE translation_jobs
   ADD COLUMN IF NOT EXISTS source_only_output_path VARCHAR(1024) NULL
   AFTER output_path;
+
+-- Migration: add unique constraint for segments upsert (run once on existing databases)
+ALTER TABLE translation_segments
+  ADD UNIQUE KEY uq_segments_job_id (translation_job_id, segment_identifier);
+
+-- QA validation jobs table
+CREATE TABLE IF NOT EXISTS qa_validation_jobs (
+  id CHAR(36) PRIMARY KEY,
+  mode ENUM('compare', 'review') NOT NULL,
+  source_filename VARCHAR(512) NULL,
+  translated_filename VARCHAR(512) NULL,
+  review_filename VARCHAR(512) NULL,
+  target_language VARCHAR(64) NOT NULL,
+  total_segments INT NOT NULL DEFAULT 0,
+  reviewed_segments INT NOT NULL DEFAULT 0,
+  status VARCHAR(32) NOT NULL DEFAULT 'running',
+  error_message TEXT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  completed_at DATETIME NULL,
+  INDEX idx_qa_status (status),
+  INDEX idx_qa_created (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- QA validation segments table
+CREATE TABLE IF NOT EXISTS qa_validation_segments (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  qa_job_id CHAR(36) NOT NULL,
+  segment_id VARCHAR(255) NOT NULL,
+  source_text MEDIUMTEXT NULL,
+  translated_text MEDIUMTEXT NULL,
+  status ENUM('ok', 'warning', 'error', 'missing') NOT NULL,
+  suggestion TEXT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_qa_segments_job
+    FOREIGN KEY (qa_job_id)
+    REFERENCES qa_validation_jobs(id)
+    ON DELETE CASCADE,
+  INDEX idx_qa_segments_job (qa_job_id),
+  INDEX idx_qa_segments_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

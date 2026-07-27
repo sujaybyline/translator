@@ -123,20 +123,20 @@ export function HistoryPage() {
                       <td className="px-4 py-3.5">
                         {isCompleted ? (
                           <div className="flex items-center gap-2">
-                            <a
+                            {/* <a
                               href={getDownloadUrl(job.id)}
                               className="inline-flex items-center gap-1 rounded-lg bg-[var(--color-brand)] px-3 py-1.5 text-xs font-semibold text-white no-underline transition hover:bg-[var(--color-brand-light)]"
                             >
                               <Download size={12} aria-hidden />
                               Bilingual
-                            </a>
+                            </a> */}
                             <a
                               href={getDownloadSourceUrl(job.id)}
                               title="Source-replaced XLIFF"
-                              className="inline-flex items-center gap-1 rounded-lg border border-[var(--color-brand)] px-3 py-1.5 text-xs font-semibold text-[var(--color-brand)] no-underline transition hover:bg-[color-mix(in_oklab,var(--color-brand)_6%,white)]"
+                            className="inline-flex items-center gap-1 rounded-lg bg-[var(--color-brand)] px-3 py-1.5 text-xs font-semibold text-white no-underline transition hover:bg-[var(--color-brand-light)]"
                             >
                               <Download size={12} aria-hidden />
-                              Source Replaced 
+                              Download
                             </a>
                           </div>
                         ) : (

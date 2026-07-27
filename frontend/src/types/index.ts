@@ -98,3 +98,26 @@ export const AI_MODEL_OPTIONS: Record<AiProvider, Array<{ value: string; label: 
     { value: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5' },
   ],
 };
+
+// ── QA types ────────────────────────────────────────────────────────────────
+
+export type QASegmentStatus = 'ok' | 'warning' | 'error' | 'missing';
+
+export interface QASegmentResult {
+  segmentId: string;
+  sourceText: string;
+  translatedText: string;
+  status: QASegmentStatus;
+  suggestion: string;
+}
+
+export interface QAResult {
+  sourceFilename: string;
+  translatedFilename: string;
+  totalSegments: number;
+  okCount: number;
+  warningCount: number;
+  errorCount: number;
+  missingCount: number;
+  segments: QASegmentResult[];
+}
