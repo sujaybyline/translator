@@ -60,7 +60,8 @@ const pipelinePromises = new Map<string, Promise<void>>();
 const pipelineControllers = new Map<string, AbortController>();
 
 function publicJob(job: JobState) {
-  const { rawXml: _r, parseSegments: _p, ...rest } = job;
+  // Never expose internal file system paths in API responses
+  const { rawXml: _r, parseSegments: _p, uploadPath: _u, outputPath: _o, ...rest } = job;
   return rest;
 }
 
@@ -73,7 +74,7 @@ async function persistJob(job: JobState): Promise<void> {
     xliff_version: job.xliffVersion,
     total_segments: job.totalSegments,
     translated_segments: job.translatedSegments,
-    status: job.status === 'translating' || job.status === 'parsing' || job.status === 'preparing'
+    status: ['translating', 'parsing', 'preparing', 'detecting_language', 'validating', 'rebuilding'].includes(job.status)
       ? 'processing'
       : job.status,
     error_message: job.errorMessage,
@@ -108,7 +109,10 @@ export async function createJobFromUpload(file: {
     sourceLanguage: lang.code,
     sourceLanguageName: lang.name,
     targetLanguage: config.defaultTargetLanguage,
-    targetLanguageName: SUPPORTED_TARGET_LANGUAGES.de.name,
+    targetLanguageName:
+      SUPPORTED_TARGET_LANGUAGES[
+        config.defaultTargetLanguage as keyof typeof SUPPORTED_TARGET_LANGUAGES
+      ]?.name ?? config.defaultTargetLanguage,
     xliffVersion: parsed.version,
     totalSegments: parsed.segments.length,
     translatedSegments: 0,
@@ -177,9 +181,9 @@ export async function getJobAsync(jobId: string): Promise<JobState | null> {
     translatedSegments: row.translated_segments,
     status: row.status as JobStatus,
     errorMessage: row.error_message,
-    uploadPath: row.upload_path,
-    outputPath: row.output_path,
-    sourceOnlyOutputPath: row.source_only_output_path ?? null,
+    uploadPath: null,   // intentionally omitted from public response
+    outputPath: null,   // intentionally omitted from public response
+    sourceOnlyOutputPath: null,
     fileSize: row.file_size,
     createdAt: new Date(row.created_at).toISOString(),
     completedAt: row.completed_at ? new Date(row.completed_at).toISOString() : null,
@@ -217,9 +221,9 @@ export async function listHistory(): Promise<JobState[]> {
       translatedSegments: row.translated_segments,
       status: row.status as JobStatus,
       errorMessage: row.error_message,
-      uploadPath: row.upload_path,
-      outputPath: row.output_path,
-      sourceOnlyOutputPath: row.source_only_output_path ?? null,
+      uploadPath: null,   // intentionally omitted from public response
+      outputPath: null,   // intentionally omitted from public response
+      sourceOnlyOutputPath: null,
       fileSize: row.file_size,
       createdAt: new Date(row.created_at).toISOString(),
       completedAt: row.completed_at ? new Date(row.completed_at).toISOString() : null,
@@ -242,20 +246,77 @@ export async function startTranslation(
   jobId: string,
   targetLanguageCode?: string,
 ): Promise<JobState> {
-  const job = memoryJobs.get(jobId);
+  let job = memoryJobs.get(jobId);
   if (!job) {
-    throw new Error('Translation job not found. Please upload the file again.');
+    const row = await db.getJobById(jobId);
+    if (!row) {
+      throw new Error('Translation job not found. Please upload the file again.');
+    }
+    if (row.status !== 'uploaded') {
+      throw new Error('This job cannot be started in its current state. Please upload the file again.');
+    }
+    if (!row.upload_path) {
+      throw new Error('Upload file is no longer available. Please upload the file again.');
+    }
+    let xml: string;
+    try {
+      xml = await fs.readFile(row.upload_path, 'utf8');
+    } catch {
+      throw new Error('Upload file is no longer available on disk. Please upload the file again.');
+    }
+    const parsed = parseXliff(xml);
+    const lang = detectSourceLanguage(
+      row.source_language,
+      parsed.segments.map((s) => s.sourceText),
+    );
+    job = {
+      id: row.id,
+      originalFilename: row.original_filename,
+      outputFilename: row.output_filename,
+      sourceLanguage: lang.code,
+      sourceLanguageName: lang.name,
+      targetLanguage: row.target_language,
+      targetLanguageName:
+        SUPPORTED_TARGET_LANGUAGES[row.target_language as keyof typeof SUPPORTED_TARGET_LANGUAGES]
+          ?.name ?? row.target_language,
+      xliffVersion: (row.xliff_version as XliffVersion) ?? parsed.version,
+      totalSegments: parsed.segments.length,
+      translatedSegments: 0,
+      status: 'uploaded',
+      errorMessage: null,
+      uploadPath: row.upload_path,
+      outputPath: null,
+      sourceOnlyOutputPath: null,
+      fileSize: row.file_size,
+      createdAt: new Date(row.created_at).toISOString(),
+      completedAt: null,
+      progressPercent: 0,
+      segments: parsed.segments.map((s) => ({
+        segmentId: s.id,
+        original: s.sourceText,
+        translation: '',
+        status: 'pending',
+        validationStatus: 'pending',
+      })),
+      rawXml: parsed.rawXml,
+      parseSegments: parsed.segments,
+    };
+    memoryJobs.set(job.id, job);
   }
-  if (job.status !== 'uploaded') {
-    return publicJob(job) as JobState;
+
+  // After the if(!job) block TypeScript needs a concrete type — assert it here
+  const resolvedJob = job as JobState;
+
+  if (resolvedJob.status !== 'uploaded') {
+    return publicJob(resolvedJob) as JobState;
   }
 
   const target = resolveTargetLanguage(targetLanguageCode ?? config.defaultTargetLanguage);
-  job.targetLanguage = target.code;
-  job.targetLanguageName = target.name;
+  resolvedJob.targetLanguage = target.code;
+  resolvedJob.targetLanguageName = target.name;
 
-  job.status = 'preparing';
-  await persistJob(job);
+  resolvedJob.status = 'preparing';
+  await persistJob(resolvedJob);
   const controller = new AbortController();
   pipelineControllers.set(jobId, controller);
   const pipeline = runTranslationPipeline(jobId, controller.signal);
@@ -270,7 +331,7 @@ export async function startTranslation(
       pipelineControllers.delete(jobId);
     },
   );
-  return publicJob(job) as JobState;
+  return publicJob(resolvedJob) as JobState;
 }
 
 export async function clearJob(jobId: string): Promise<boolean> {
@@ -294,6 +355,8 @@ export async function clearJob(jobId: string): Promise<boolean> {
     cancellationRequests.add(jobId);
     pipelineControllers.get(jobId)?.abort();
     await pipelinePromises.get(jobId);
+    // Ensure the flag is cleaned up even if the pipeline finished before the abort landed
+    cancellationRequests.delete(jobId);
   }
   const currentJob = memoryJobs.get(jobId);
   if (!currentJob) return true;
@@ -471,14 +534,16 @@ async function runTranslationPipeline(jobId: string, signal: AbortSignal): Promi
     await backupTranslatedFile(outputPath, `${job.id}_${outputFilename}`);
     throwIfCancellationRequested(jobId);
 
-    // Build and write the source-replaced XLIFF to disk so it persists across restarts
     const sourceOnlyContent = rebuildXliffSourceOnly({
       rawXml: job.rawXml,
       version: job.xliffVersion ?? '1.2',
       translations: successful.map((r) => ({ id: r.id, translatedText: r.translatedText })),
       targetLanguageCode: job.targetLanguage,
     });
-    const sourceOnlyFilename = `${job.sourceLanguageName}_to_${job.targetLanguageName}.xliff`;
+    // Derive source-only filename from the bilingual filename — avoids 'Unknown' language names
+    const soExt = outputFilename.match(/\.(xlf|xliff)$/i)?.[0] ?? '.xliff';
+    const soBase = outputFilename.replace(/\.(xlf|xliff)$/i, '');
+    const sourceOnlyFilename = `${soBase}_source${soExt}`;
     const sourceOnlyPath = path.join(config.paths.output, `${job.id}_${sourceOnlyFilename}`);
     await fs.writeFile(sourceOnlyPath, sourceOnlyContent, 'utf8');
     throwIfCancellationRequested(jobId);
@@ -539,29 +604,35 @@ async function runTranslationPipeline(jobId: string, signal: AbortSignal): Promi
 export async function getDownloadPath(
   jobId: string,
 ): Promise<{ filePath: string; filename: string } | null> {
-  const job = memoryJobs.get(jobId) ?? (await getJobAsync(jobId));
-  if (!job || job.status !== 'completed' || !job.outputPath) {
-    // Try reconstructing path from DB fields
-    if (job?.outputFilename) {
-      const candidate = path.join(config.paths.output, `${jobId}_${job.outputFilename}`);
-      try {
-        await fs.access(candidate);
-        return { filePath: candidate, filename: job.outputFilename };
-      } catch {
-        return null;
-      }
+  // Use raw in-memory job first so we have the real outputPath (not stripped by publicJob)
+  const rawJob = memoryJobs.get(jobId);
+  if (rawJob && rawJob.status === 'completed' && rawJob.outputPath) {
+    try {
+      await fs.access(rawJob.outputPath);
+      return {
+        filePath: rawJob.outputPath,
+        filename: rawJob.outputFilename ?? path.basename(rawJob.outputPath),
+      };
+    } catch {
+      // File missing — fall through to reconstruction
     }
-    return null;
   }
-  try {
-    await fs.access(job.outputPath);
-    return {
-      filePath: job.outputPath,
-      filename: job.outputFilename ?? path.basename(job.outputPath),
-    };
-  } catch {
-    return null;
+
+  // Fall back to DB lookup + path reconstruction
+  const job = rawJob ?? (await getJobAsync(jobId));
+  if (!job || job.status !== 'completed') return null;
+
+  if (job.outputFilename) {
+    const candidate = path.join(config.paths.output, `${jobId}_${job.outputFilename}`);
+    try {
+      await fs.access(candidate);
+      return { filePath: candidate, filename: job.outputFilename };
+    } catch {
+      return null;
+    }
   }
+
+  return null;
 }
 
 /**
@@ -587,15 +658,28 @@ export async function getDownloadSourceContent(
   }
 
   // Fallback: reconstruct path from outputFilename convention (covers jobs translated
-  // before this feature was added, where sourceOnlyOutputPath may be null in DB)
+  // before sourceOnlyOutputPath was added, where it may be null in DB)
   if (job.outputFilename) {
-    const sourceOnlyFilename = `${job.sourceLanguageName}_to_${job.targetLanguageName}.xliff`;
+    // Derive the source-only filename from the bilingual outputFilename by inserting '_source'
+    // e.g. myfile_de.xlf  →  myfile_de_source.xlf
+    // This avoids depending on sourceLanguageName (which can be 'Unknown').
+    const ext = job.outputFilename.match(/\.(xlf|xliff)$/i)?.[0] ?? '.xliff';
+    const base = job.outputFilename.replace(/\.(xlf|xliff)$/i, '');
+    const sourceOnlyFilename = `${base}_source${ext}`;
     const candidate = path.join(config.paths.output, `${jobId}_${sourceOnlyFilename}`);
     try {
       await fs.access(candidate);
       return { filePath: candidate, filename: sourceOnlyFilename };
     } catch {
-      return null;
+      // Also try the old naming convention in case the file was written before this fix
+      const legacyFilename = `${job.sourceLanguageName}_to_${job.targetLanguageName}.xliff`;
+      const legacyCandidate = path.join(config.paths.output, `${jobId}_${legacyFilename}`);
+      try {
+        await fs.access(legacyCandidate);
+        return { filePath: legacyCandidate, filename: legacyFilename };
+      } catch {
+        return null;
+      }
     }
   }
 
@@ -615,16 +699,35 @@ export async function getPreview(
   if (!job) throw new Error('Job not found');
 
   let segments = job.segments;
-  
-  // Always fetch from database if available to get latest edits
+
   if (db.isDatabaseAvailable()) {
     const rows = await db.getSegmentsByJobId(jobId);
-    segments = rows.map((s) => ({
-      segmentId: s.segment_identifier,
-      original: s.source_text,
-      translation: s.translated_text ?? '',
-      status: s.status,
-      validationStatus: s.validation_status,
+    if (rows.length > 0) {
+      segments = rows.map((s) => ({
+        segmentId: s.segment_identifier,
+        original: s.source_text,
+        translation: s.translated_text ?? '',
+        status: s.status,
+        validationStatus: s.validation_status,
+      }));
+    } else if (job.parseSegments && job.parseSegments.length > 0) {
+      // Job is uploaded but not yet translated — segments only exist in memory
+      segments = job.parseSegments.map((s) => ({
+        segmentId: s.id,
+        original: s.sourceText,
+        translation: '',
+        status: 'pending',
+        validationStatus: 'pending',
+      }));
+    }
+  } else if ((!segments || segments.length === 0) && job.parseSegments) {
+    // No DB — fall back to parsed segments so uploaded jobs show source text
+    segments = job.parseSegments.map((s) => ({
+      segmentId: s.id,
+      original: s.sourceText,
+      translation: '',
+      status: 'pending',
+      validationStatus: 'pending',
     }));
   }
 
@@ -656,12 +759,12 @@ export async function updateSegmentTranslation(
   segmentId: string,
   newTranslation: string,
 ): Promise<PreviewSegment | null> {
-  // Update in DB first
-  if (db.isDatabaseAvailable()) {
-    await db.updateSegmentTranslation(jobId, segmentId, newTranslation);
-  }
-
   const job = memoryJobs.get(jobId);
+  if (db.isDatabaseAvailable()) {
+    const sourceText =
+      job?.segments.find((s) => s.segmentId === segmentId)?.original ?? '';
+    await db.updateSegmentTranslation(jobId, segmentId, newTranslation, sourceText);
+  }
   if (!job) {
     // Job not in memory - load from DB and return updated segment
     const dbJob = await db.getJobById(jobId);
@@ -706,14 +809,16 @@ export async function updateSegmentTranslation(
       const outputPath = path.join(config.paths.output, `${job.id}_${job.outputFilename}`);
       await fs.writeFile(outputPath, rebuilt, 'utf8');
 
-      // Also rebuild source-only version
+      // Also rebuild source-only version using stable filename (avoids 'Unknown' language names)
       const sourceOnlyContent = rebuildXliffSourceOnly({
         rawXml: job.rawXml,
         version: job.xliffVersion ?? '1.2',
         translations,
         targetLanguageCode: job.targetLanguage,
       });
-      const sourceOnlyFilename = `${job.sourceLanguageName}_to_${job.targetLanguageName}.xliff`;
+      const soExt2 = job.outputFilename.match(/\.(xlf|xliff)$/i)?.[0] ?? '.xliff';
+      const soBase2 = job.outputFilename.replace(/\.(xlf|xliff)$/i, '');
+      const sourceOnlyFilename = `${soBase2}_source${soExt2}`;
       const sourceOnlyPath = path.join(config.paths.output, `${job.id}_${sourceOnlyFilename}`);
       await fs.writeFile(sourceOnlyPath, sourceOnlyContent, 'utf8');
     } catch (err) {

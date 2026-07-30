@@ -1,6 +1,6 @@
 import type { Request, Response } from 'express';
 import fs from 'node:fs/promises';
-import { runQAComparison, runQASingleFileReview } from '../services/qaService.js';
+import { runQAComparison, runQASingleFileReview, cancelQAJobInMemory } from '../services/qaService.js';
 import type { QABatchEvent, QASegmentResult } from '../services/qaService.js';
 import { SUPPORTED_TARGET_LANGUAGES } from '../types/index.js';
 import * as db from '../db/pool.js';
@@ -44,8 +44,15 @@ export async function compareXliff(req: Request, res: Response): Promise<void> {
 
   sseHeaders(res);
 
+  // send real jobId immediately so frontend can sync
+  sendEvent(res, 'jobStarted', { jobId: qaJobId });
+
   const controller = new AbortController();
-  req.on('close', () => controller.abort());
+  let closeTimer: NodeJS.Timeout | null = null;
+  req.on('close', () => {
+    closeTimer = setTimeout(() => controller.abort(), 30_000);
+  });
+  res.on('finish', () => { if (closeTimer) clearTimeout(closeTimer); });
 
   try {
     const allSegments: QASegmentResult[] = [];
@@ -99,8 +106,15 @@ export async function reviewXliff(req: Request, res: Response): Promise<void> {
 
   sseHeaders(res);
 
+  // send real jobId immediately so frontend can sync
+  sendEvent(res, 'jobStarted', { jobId: qaJobId });
+
   const controller = new AbortController();
-  req.on('close', () => controller.abort());
+  let closeTimer: NodeJS.Timeout | null = null;
+  req.on('close', () => {
+    closeTimer = setTimeout(() => controller.abort(), 30_000);
+  });
+  res.on('finish', () => { if (closeTimer) clearTimeout(closeTimer); });
 
   try {
     const onBatch = (event: QABatchEvent) => {
@@ -162,10 +176,8 @@ export async function getRunningQAJobs(req: Request, res: Response): Promise<voi
 export async function cancelQAJob(req: Request, res: Response): Promise<void> {
   const { jobId } = req.params;
   try {
-    // Cancel in memory tracker (sets cancelled flag and aborts controller)
-    const { cancelQAJobInMemory } = await import('../services/qaService.js');
+    // Cancel in-memory tracker (sets cancelled flag and aborts controller)
     cancelQAJobInMemory(jobId);
-    
     // Update database status
     await db.updateQAJobProgress(jobId, 0, 'cancelled');
     res.json({ success: true });

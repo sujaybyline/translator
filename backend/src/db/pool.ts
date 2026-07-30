@@ -215,13 +215,18 @@ export async function updateSegmentTranslation(
   jobId: string,
   segmentId: string,
   translation: string,
+  sourceText = '',
 ): Promise<void> {
   if (!dbAvailable || !pool) return;
   await pool.execute(
-    `UPDATE translation_segments
-     SET translated_text = :translation, status = 'pending', validation_status = 'pending'
-     WHERE translation_job_id = :jobId AND segment_identifier = :segmentId`,
-    { jobId, segmentId, translation },
+    `INSERT INTO translation_segments
+       (translation_job_id, segment_identifier, source_text, translated_text, status, validation_status, sort_order)
+     VALUES (:jobId, :segmentId, :sourceText, :translation, 'pending', 'pending', 0)
+     ON DUPLICATE KEY UPDATE
+       translated_text = :translation,
+       status = 'pending',
+       validation_status = 'pending'`,
+    { jobId, segmentId, sourceText, translation },
   );
 }
 export interface AppSettingsRecord {

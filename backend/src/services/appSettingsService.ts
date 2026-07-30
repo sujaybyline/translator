@@ -6,13 +6,20 @@ export interface PublicAppSettings {
   provider: AiProvider | null;
   model: string | null;
   hasApiKey: boolean;
-  api_key: string | null;
+  /** First 4 + last 4 characters of the key with the middle masked — safe to display. */
+  maskedApiKey: string | null;
+}
+
+/** Mask a key to show only the first 4 and last 4 characters. */
+function maskKey(key: string): string {
+  if (key.length <= 8) return '••••••••';
+  return `${key.slice(0, 4)}${'•'.repeat(Math.min(key.length - 8, 20))}${key.slice(-4)}`;
 }
 
 export async function getPublicAppSettings(): Promise<PublicAppSettings> {
   const settings = await getAppSettings();
   if (!settings) {
-    return { provider: null, model: null, hasApiKey: false, api_key: null };
+    return { provider: null, model: null, hasApiKey: false, maskedApiKey: null };
   }
 
   const apiKey = settings.api_key?.trim() || null;
@@ -21,7 +28,7 @@ export async function getPublicAppSettings(): Promise<PublicAppSettings> {
     provider: settings.provider,
     model: settings.model,
     hasApiKey: Boolean(apiKey),
-    api_key: apiKey,
+    maskedApiKey: apiKey ? maskKey(apiKey) : null,
   };
 }
 

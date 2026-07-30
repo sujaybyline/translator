@@ -31,10 +31,6 @@ export const config = {
   port: intEnv('PORT', 4000),
   nodeEnv: process.env.NODE_ENV ?? 'development',
   frontendUrl: process.env.FRONTEND_URL ?? 'http://localhost:5173',
-  geminiApiKey: process.env.GEMINI_API_KEY ?? '',
-  geminiModel: process.env.GEMINI_MODEL ?? 'gemini-2.0-flash',
-  anthropicApiKey: process.env.ANTHROPIC_API_KEY ?? '',
-  anthropicModel: process.env.ANTHROPIC_MODEL ?? 'claude-sonnet-5',
   batchSize: intEnv('TRANSLATION_BATCH_SIZE', 25),
   batchDelayMs: intEnv('TRANSLATION_BATCH_DELAY_MS', 1000),
   maxRetries: intEnv('TRANSLATION_MAX_RETRIES', 3),
@@ -54,11 +50,3 @@ export const config = {
   },
   defaultTargetLanguage: 'de' as const,
 };
-
-export function assertGeminiConfigured(): void {
-  if (!config.geminiApiKey || config.geminiApiKey === 'your_api_key_here') {
-    throw new Error(
-      'GEMINI_API_KEY is not configured. Add it to your .env file (see .env.example).',
-    );
-  }
-}

@@ -1,3 +1,5 @@
+import { string } from "zod/v4";
+
 export type JobStatus =
   | 'uploaded'
   | 'uploading'
@@ -95,6 +97,7 @@ export interface TranslationJobRecord {
   created_at: Date;
   completed_at: Date | null;
 }
+
 
 export interface TranslationSegmentRecord {
   id: number;

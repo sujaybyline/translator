@@ -5,6 +5,7 @@ import {
   Search, ArrowLeft, ArrowRight, FileText, GitCompare, ScanSearch, X,
 } from 'lucide-react';
 import type { QAResult, QASegmentResult, QASegmentStatus } from '../types';
+import { TARGET_LANGUAGES } from '../types';
 
 const API_BASE = import.meta.env.VITE_API_URL ?? '/api';
 
@@ -23,6 +24,7 @@ function runQACompareSSE(
   onBatch: (data: QABatchData) => void,
   signal: AbortSignal,
   jobId?: string,
+  onJobStarted?: (jobId: string) => void,
 ): Promise<QAResult> {
   return new Promise((resolve, reject) => {
     const form = new FormData();
@@ -60,7 +62,17 @@ function runQACompareSSE(
         buffer = lines.pop() || '';
 
         for (const line of lines) {
-          if (line.startsWith('event: batch\n')) {
+          if (line.startsWith('event: jobStarted\n')) {
+            const dataMatch = line.match(/data: (.+)/);
+            if (dataMatch) {
+              try {
+                const { jobId: serverJobId } = JSON.parse(dataMatch[1]) as { jobId: string };
+                onJobStarted?.(serverJobId);
+              } catch (e) {
+                console.error('Failed to parse jobStarted data:', e);
+              }
+            }
+          } else if (line.startsWith('event: batch\n')) {
             const dataMatch = line.match(/data: (.+)/);
             if (dataMatch) {
               try {
@@ -105,6 +117,7 @@ function runQAReviewSSE(
   onBatch: (data: QABatchData) => void,
   signal: AbortSignal,
   jobId?: string,
+  onJobStarted?: (jobId: string) => void,
 ): Promise<QAResult> {
   return new Promise((resolve, reject) => {
     const form = new FormData();
@@ -141,7 +154,17 @@ function runQAReviewSSE(
         buffer = lines.pop() || '';
 
         for (const line of lines) {
-          if (line.startsWith('event: batch\n')) {
+          if (line.startsWith('event: jobStarted\n')) {
+            const dataMatch = line.match(/data: (.+)/);
+            if (dataMatch) {
+              try {
+                const { jobId: serverJobId } = JSON.parse(dataMatch[1]) as { jobId: string };
+                onJobStarted?.(serverJobId);
+              } catch (e) {
+                console.error('Failed to parse jobStarted data:', e);
+              }
+            }
+          } else if (line.startsWith('event: batch\n')) {
             const dataMatch = line.match(/data: (.+)/);
             if (dataMatch) {
               try {
@@ -471,15 +494,6 @@ function ResultsTable({ segments, mode }: { segments: QASegmentResult[]; mode?: 
 
 // ── main page ─────────────────────────────────────────────────────────────────
 
-const TARGET_LANGUAGE_OPTIONS = [
-  { code: 'de', name: 'German' },
-  { code: 'fr', name: 'French' },
-  { code: 'es', name: 'Spanish' },
-  { code: 'it', name: 'Italian' },
-  { code: 'pt', name: 'Portuguese' },
-  { code: 'nl', name: 'Dutch' },
-];
-
 type QAMode = 'compare' | 'review';
 
 export function QAPage() {
@@ -493,20 +507,19 @@ export function QAPage() {
   const [reviewFile, setReviewFile] = useState<File | null>(null);
 
   const [targetLanguage, setTargetLanguage] = useState('de');
-  const [result, setResult] = useState<QAResult | null>(null);
   const [validatedPage, setValidatedPage] = useState(1);
   const validatedPageSize = 10;
   const abortControllerRef = useRef<AbortController | null>(null);
   const isRunningRef = useRef(false); // Prevent duplicate runs
 
   // Use global QA validation context
-  const { state: qaState, startValidation, cancelValidation, updateProgress, clearValidation } = useQAValidation();
+  const { state: qaState, startValidation, cancelValidation, updateProgress, clearValidation, markSseComplete, updateJobId } = useQAValidation();
+  const result = qaState.result;
 
   const clearAll = () => {
     setSourceFile(null);
     setTranslatedFile(null);
     setReviewFile(null);
-    setResult(null);
     setValidatedPage(1);
     clearValidation();
     if (abortControllerRef.current) {
@@ -520,32 +533,24 @@ export function QAPage() {
     await cancelValidation();
   };
 
-  // Cancel validation when uploading new files
-  const handleSourceFileChange = (file: File | null) => {
-    if (qaState.running) {
-      cancelValidation();
-    }
+  // Cancel active validation when a new file is dropped into a zone
+  const handleSourceFileChange = (file: File) => {
+    if (qaState.running) void cancelValidation();
     setSourceFile(file);
   };
 
-  const handleTranslatedFileChange = (file: File | null) => {
-    if (qaState.running) {
-      cancelValidation();
-    }
+  const handleTranslatedFileChange = (file: File) => {
+    if (qaState.running) void cancelValidation();
     setTranslatedFile(file);
   };
 
-  const handleReviewFileChange = (file: File | null) => {
-    if (qaState.running) {
-      cancelValidation();
-    }
+  const handleReviewFileChange = (file: File) => {
+    if (qaState.running) void cancelValidation();
     setReviewFile(file);
   };
 
   const switchMode = (m: QAMode) => {
     setMode(m);
-    // Don't clearAll() when switching modes - let validation continue in background
-    // Only clear if user explicitly clicks cancel or starts a new validation
   };
 
   // Cleanup on unmount - don't abort, let validation continue in background
@@ -569,7 +574,6 @@ export function QAPage() {
     }
     
     isRunningRef.current = true;
-    setResult(null);
     setValidatedPage(1);
     
     abortControllerRef.current = new AbortController();
@@ -578,8 +582,9 @@ export function QAPage() {
     const tempJobId = crypto.randomUUID();
     await startValidation(tempJobId, mode, abortControllerRef.current);
     
+    let data: QAResult | undefined;
     try {
-      const data = mode === 'compare'
+      data = mode === 'compare'
         ? await runQACompareSSE(
             sourceFile!,
             translatedFile!,
@@ -589,6 +594,7 @@ export function QAPage() {
             },
             abortControllerRef.current.signal,
             tempJobId,
+            (serverJobId) => updateJobId(serverJobId),
           )
         : await runQAReviewSSE(
             reviewFile!,
@@ -598,8 +604,8 @@ export function QAPage() {
             },
             abortControllerRef.current.signal,
             tempJobId,
+            (serverJobId) => updateJobId(serverJobId),
           );
-      setResult(data);
     } catch (err) {
       if (err instanceof Error && err.name === 'AbortError') {
         // Context will handle cancellation via polling
@@ -611,6 +617,8 @@ export function QAPage() {
     } finally {
       abortControllerRef.current = null;
       isRunningRef.current = false;
+      // Signal the context that SSE is done so polling can resume as fallback
+      markSseComplete(data ?? null);
     }
   };
 
@@ -693,7 +701,7 @@ export function QAPage() {
                 disabled={qaState.running}
                 className="mt-1.5 block rounded-xl border border-[var(--color-line)] bg-white px-3 py-2 text-sm font-semibold text-[var(--color-ink)] focus:border-[var(--color-brand)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand)]/20 disabled:opacity-60"
               >
-                {TARGET_LANGUAGE_OPTIONS.map((l) => (
+                {TARGET_LANGUAGES.map((l) => (
                   <option key={l.code} value={l.code}>{l.name}</option>
                 ))}
               </select>

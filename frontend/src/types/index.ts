@@ -67,7 +67,8 @@ export interface AppSettings {
   provider: AiProvider | null;
   model: string | null;
   hasApiKey: boolean;
-  api_key: string | null;
+  /** First 4 + last 4 chars of the saved key, middle masked. Null if no key saved. */
+  maskedApiKey: string | null;
 }
 
 export interface SaveAppSettingsInput {

@@ -55,7 +55,7 @@ export function SettingsPage() {
         const savedModel = settingsData.model;
         const modelExists = savedModel && options.some((option) => option.value === savedModel);
         setModel(savedModel && (modelExists || settingsData.provider === nextProvider) ? savedModel : options[0].value);
-        setApiKey(settingsData.api_key ?? '');
+        setApiKey(''); // key is never returned from the server for security
       })
       .catch((err) => {
         if (!cancelled) {
@@ -99,7 +99,7 @@ export function SettingsPage() {
       const [healthData, settingsData] = await Promise.all([getHealth(), getSettings()]);
       setHealth(healthData);
       setSavedSettings(settingsData);
-      setApiKey(settingsData.api_key ?? '');
+      setApiKey(''); // key is never returned from server for security
       setSuccess('Settings saved. New translations will use this configuration immediately.');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save settings');
@@ -176,7 +176,11 @@ export function SettingsPage() {
                     setApiKey(event.target.value);
                     setSuccess(null);
                   }}
-                  placeholder={savedSettings?.hasApiKey ? 'API key saved' : 'sk-…'}
+                  placeholder={
+                    savedSettings?.maskedApiKey
+                      ? `Current: ${savedSettings.maskedApiKey}`
+                      : 'sk-… or AIza…'
+                  }
                   autoComplete="off"
                   className="w-full rounded-xl border border-[var(--color-line)] bg-white py-3 pl-4 pr-12 text-sm text-[var(--color-ink)]"
                 />
@@ -190,8 +194,14 @@ export function SettingsPage() {
                 </button>
               </div>
               <p className="mt-2 text-sm text-[var(--color-ink-soft)]">
-                {savedSettings?.hasApiKey ? (
-                  <span className="text-[var(--color-success)]">✓ API key configured</span>
+                {savedSettings?.maskedApiKey ? (
+                  <span className="flex items-center gap-1.5">
+                    <span className="text-[var(--color-ok)]">✓ Key configured:</span>
+                    <code className="rounded bg-[var(--color-paper-2)] px-1.5 py-0.5 font-mono text-xs tracking-widest text-[var(--color-ink)]">
+                      {savedSettings.maskedApiKey}
+                    </code>
+                    <span className="text-[var(--color-ink-soft)]/70">— enter a new key above to replace it</span>
+                  </span>
                 ) : (
                   'No API key saved yet.'
                 )}
@@ -201,7 +211,7 @@ export function SettingsPage() {
         )}
 
         {error && <p className="mt-4 text-sm text-[var(--color-danger)]">{error}</p>}
-        {success && <p className="mt-4 text-sm text-[var(--color-success)]">{success}</p>}
+        {success && <p className="mt-4 text-sm text-[var(--color-ok)]">{success}</p>}
 
         <button
           type="submit"

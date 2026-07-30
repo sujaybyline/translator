@@ -50,9 +50,7 @@ export function languageCodeToName(code: string | null | undefined): string {
   return code;
 }
 
-/**
- * Prefer XLIFF-declared source language; fall back to franc detection on segment text.
- */
+
 export function detectSourceLanguage(
   declared: string | null,
   sampleTexts: string[],

@@ -125,7 +125,11 @@ export async function updateSegment(
     
     if (!segmentId) throw new AppError('segmentId is required.', 400);
     if (typeof translation !== 'string') throw new AppError('translation is required.', 400);
-    
+
+    // Guard against oversized payloads (belt-and-suspenders on top of express body limit)
+    if (segmentId.length > 512) throw new AppError('segmentId is too long.', 400);
+    if (translation.length > 500_000) throw new AppError('translation value is too large.', 400);
+
     const updated = await jobService.updateSegmentTranslation(req.params.jobId, segmentId, translation);
     if (!updated) {
       throw new AppError('Segment or job not found.', 404);

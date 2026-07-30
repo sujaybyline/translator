@@ -8,6 +8,39 @@ interface Props {
   job: TranslationJob;
 }
 
+// Strips XML tags for display — removes tag wrappers but NOT their inner content
+// so <bpt id="1">&lt;Style&gt;</bpt><g id="2">Hello</g><ept id="1">&lt;/Style&gt;</ept>
+// becomes "Hello"
+function stripTagsForDisplay(value: string): string {
+  if (!value.includes('<')) return value;
+  // Remove bpt/ept pairs INCLUDING their inner content (they contain code like &lt;Style&gt;)
+  let result = value.replace(/<bpt\b[^>]*>[\s\S]*?<\/bpt>/gi, '');
+  result = result.replace(/<ept\b[^>]*>[\s\S]*?<\/ept>/gi, '');
+  result = result.replace(/<ph\b[^>]*>[\s\S]*?<\/ph>/gi, '');
+  result = result.replace(/<ph\b[^>]*\/>/gi, '');
+  // Remove remaining tag wrappers (g, mrk, x etc) but keep their text content
+  result = result.replace(/<[^>]+>/g, '');
+  return result.trim();
+}
+
+// Puts edited plain text back into the longest text node in the original tagged string
+function reinjectTags(original: string, editedText: string): string {
+  if (!original.includes('<')) return editedText;
+  const parts = original.split(/(<[^>]+>)/);
+  let longestIdx = -1;
+  let longestLen = -1;
+  for (let i = 0; i < parts.length; i++) {
+    if (!parts[i].startsWith('<') && parts[i].trim().length > longestLen) {
+      longestLen = parts[i].trim().length;
+      longestIdx = i;
+    }
+  }
+  if (longestIdx === -1) return editedText;
+  const result = [...parts];
+  result[longestIdx] = editedText;
+  return result.join('');
+}
+
 // Editable cell — edit raw XML/XLIFF directly, preserving all tags
 function EditableCell({
   value,
@@ -26,23 +59,34 @@ function EditableCell({
 
   // sync draft when value changes from outside (new translation arrived)
   useEffect(() => {
-    if (!editing) setDraft(value);
+    if (!editing) setDraft(stripTagsForDisplay(value));
   }, [value, editing]);
+
+  // Auto-size the textarea to fit its content whenever the draft changes
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${el.scrollHeight}px`;
+  }, [draft, editing]);
 
   const commit = () => {
     setEditing(false);
-    if (draft !== value) onChange(draft);
+    const plainOriginal = stripTagsForDisplay(value);
+    if (draft === plainOriginal) return; // no change
+    const saved = value.includes('<') ? reinjectTags(value, draft) : draft;
+    onChange(saved);
   };
 
   const startEditing = () => {
-    setDraft(value);
+    setDraft(stripTagsForDisplay(value));
     setEditing(true);
   };
 
   if (!editable) {
     return (
       <span className="text-[var(--color-ink)] leading-relaxed">
-        {formatPreviewText(value) || <span className="text-[var(--color-ink-soft)]/50 italic text-xs">—</span>}
+        {formatPreviewText(stripTagsForDisplay(value)) || <span className="text-[var(--color-ink-soft)]/50 italic text-xs">—</span>}
       </span>
     );
   }
@@ -55,12 +99,15 @@ function EditableCell({
           value={draft}
           autoFocus
           rows={3}
-          onChange={(e) => setDraft(e.target.value)}
+          onChange={(e) => {
+            setDraft(e.target.value);
+          }}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); commit(); }
-            if (e.key === 'Escape') { setEditing(false); setDraft(value); }
+            if (e.key === 'Escape') { setEditing(false); setDraft(stripTagsForDisplay(value)); }
           }}
-          className="w-full rounded-lg border border-[var(--color-brand)]/50 bg-white px-2.5 py-1.5 text-sm text-[var(--color-ink)] leading-relaxed outline-none ring-2 ring-[var(--color-brand)]/20 resize-none font-mono"
+          style={{ minHeight: '4.5rem' }}
+          className="w-full rounded-lg border border-[var(--color-brand)]/50 bg-white px-2.5 py-1.5 text-sm text-[var(--color-ink)] leading-relaxed outline-none ring-2 ring-[var(--color-brand)]/20 resize-y font-mono overflow-auto"
         />
         <div className="flex gap-1.5">
           <button
@@ -72,7 +119,7 @@ function EditableCell({
           </button>
           <button
             type="button"
-            onClick={() => { setEditing(false); setDraft(value); }}
+            onClick={() => { setEditing(false); setDraft(stripTagsForDisplay(value)); }}
             className="inline-flex items-center gap-1 rounded-md border border-[var(--color-line)] px-2 py-1 text-xs font-semibold text-[var(--color-ink-soft)] transition hover:bg-[var(--color-paper)]"
           >
             <X size={11} /> Cancel
@@ -89,7 +136,7 @@ function EditableCell({
       title="Click to edit"
     >
       <span className="text-[var(--color-ink)] leading-relaxed">
-        {formatPreviewText(value) || <span className="text-[var(--color-ink-soft)]/50 italic text-xs">{placeholder ?? 'pending…'}</span>}
+        {formatPreviewText(stripTagsForDisplay(value)) || <span className="text-[var(--color-ink-soft)]/50 italic text-xs">{placeholder ?? 'pending…'}</span>}
       </span>
       <Pencil
         size={11}
@@ -107,6 +154,7 @@ export function PreviewTable({ job }: Props) {
   const [segments, setSegments] = useState<PreviewSegment[]>([]);
   const [loading, setLoading] = useState(false);
   const pageSize = 10;
+  const localEdits = useRef<Record<string, string>>({});
 
   const isUploaded = job.status === 'uploaded';
   const isActive =
@@ -141,7 +189,12 @@ export function PreviewTable({ job }: Props) {
       try {
         const data = await getPreview(job.id, { q, page, pageSize });
         if (cancelled) return;
-        setSegments(data.segments);
+        const merged = data.segments.map((seg) =>
+          localEdits.current[seg.segmentId] !== undefined
+            ? { ...seg, translation: localEdits.current[seg.segmentId] }
+            : seg,
+        );
+        setSegments(merged);
         setTotal(data.total);
       } catch {
         if (!cancelled) {
@@ -154,23 +207,24 @@ export function PreviewTable({ job }: Props) {
     };
     void load();
     return () => { cancelled = true; };
-  }, [job.id, job.status, job.segments, q, page, isActive]);
+    // job.translatedSegments (not job.segments) is used as the progress signal for the
+    // active path — avoids re-running on every poll tick due to new array references.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [job.id, job.status, job.translatedSegments, q, page, isActive]);
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
   const handleTranslationEdit = async (segmentId: string, newValue: string) => {
-    // Persist the edit to backend first
+    localEdits.current[segmentId] = newValue; // track locally
+    setSegments((prev) =>
+      prev.map((seg) =>
+        seg.segmentId === segmentId
+          ? { ...seg, translation: newValue, status: 'pending', validationStatus: 'pending' }
+          : seg,
+      ),
+    );
     try {
       await updateSegmentTranslation(job.id, segmentId, newValue);
-      
-      // Update local segments immediately after successful save
-      setSegments((prev) =>
-        prev.map((seg) =>
-          seg.segmentId === segmentId
-            ? { ...seg, translation: newValue, status: 'pending', validationStatus: 'pending' }
-            : seg,
-        ),
-      );
     } catch (err) {
       console.error('Failed to save translation edit:', err);
     }
@@ -435,7 +489,7 @@ export { Row };
 function StatusPill({ status }: { status: string }) {
   const tone =
     status === 'valid' || status === 'translated'
-      ? 'bg-[color-mix(in_oklab,var(--color-ok)_14%,white)] text-[var(--color-ok)]'
+      ? 'bg-[color-mix(in_oklab,var(--color-ok)_14%,white)] text-[var(--color-ok)]' 
       : status === 'needs_review'
         ? 'bg-[color-mix(in_oklab,var(--color-warn)_16%,white)] text-[var(--color-warn)]'
         : status === 'failed'

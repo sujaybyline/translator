@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import { config } from './src/config.js';
-import { initDatabase } from './src/db/pool.js';
+import { initDatabase, cancelAllRunningQAJobs } from './src/db/pool.js';
 import { getPublicAppSettings } from './src/services/appSettingsService.js';
 import { ensureStorageDirectories } from './src/services/fileStorage.js';
 import apiRouter from './src/routes/api.js';
@@ -9,6 +9,7 @@ import { errorHandler } from './src/middleware/errorHandler.js';
 
 async function main() {
   await initDatabase();
+  await cancelAllRunningQAJobs();
   await ensureStorageDirectories();
 
   const app = express();
