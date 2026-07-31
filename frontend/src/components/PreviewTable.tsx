@@ -23,22 +23,30 @@ function stripTagsForDisplay(value: string): string {
   return result.trim();
 }
 
-// Puts edited plain text back into the longest text node in the original tagged string
-function reinjectTags(original: string, editedText: string): string {
+function reinjectTags(original: string, strippedOriginal: string, editedText: string): string {
   if (!original.includes('<')) return editedText;
-  const parts = original.split(/(<[^>]+>)/);
-  let longestIdx = -1;
-  let longestLen = -1;
-  for (let i = 0; i < parts.length; i++) {
-    if (!parts[i].startsWith('<') && parts[i].trim().length > longestLen) {
-      longestLen = parts[i].trim().length;
-      longestIdx = i;
+
+  if (strippedOriginal) {
+    let idx = original.indexOf(strippedOriginal);
+    while (idx !== -1) {
+      // Count < and > before this position
+      // If equal — we are outside a tag — this is the real text node
+      const before = original.slice(0, idx);
+      const openCount = (before.match(/</g) ?? []).length;
+      const closeCount = (before.match(/>/g) ?? []).length;
+      if (openCount === closeCount) {
+        return (
+          original.slice(0, idx) +
+          editedText +
+          original.slice(idx + strippedOriginal.length)
+        );
+      }
+      // Inside a tag attribute — skip and find next occurrence
+      idx = original.indexOf(strippedOriginal, idx + 1);
     }
   }
-  if (longestIdx === -1) return editedText;
-  const result = [...parts];
-  result[longestIdx] = editedText;
-  return result.join('');
+
+  return editedText;
 }
 
 // Editable cell — edit raw XML/XLIFF directly, preserving all tags
@@ -74,7 +82,7 @@ function EditableCell({
     setEditing(false);
     const plainOriginal = stripTagsForDisplay(value);
     if (draft === plainOriginal) return; // no change
-    const saved = value.includes('<') ? reinjectTags(value, draft) : draft;
+    const saved = value.includes('<') ? reinjectTags(value, plainOriginal, draft) : draft;
     onChange(saved);
   };
 
