@@ -27,14 +27,14 @@ export async function initDatabase(): Promise<void> {
     }
     await pool.query('SELECT 1');
     dbAvailable = true;
-    console.log('[db] MySQL connected');
+    console.log('✅ [db] MySQL connected');
   } catch (err) {
     dbAvailable = false;
     pool = null;
     console.warn(
-      '[db] MySQL unavailable — jobs will use in-memory store. Configure DB_* in .env for persistence.',
+      '⚠️  [db] MySQL unavailable — jobs will use in-memory store. Configure DB_* in .env for persistence.',
     );
-    console.warn('[db]', err instanceof Error ? err.message : err);
+    console.warn('❌ [db]', err instanceof Error ? err.message : err);
   }
 }
 
@@ -315,7 +315,7 @@ export async function updateQAJobProgress(
   );
   // Log if update didn't affect any rows (job might not exist)
   if (result.affectedRows === 0) {
-    console.warn(`QA job ${qaJobId} not found or already deleted during progress update`);
+    console.warn(`⚠️  [qa] QA job ${qaJobId} not found or already deleted during progress update`);
   }
 }
 

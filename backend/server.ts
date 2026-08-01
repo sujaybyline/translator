@@ -29,18 +29,18 @@ async function main() {
   app.use(errorHandler);
 
   app.listen(config.port, async () => {
-    console.log(`[server] XLIFF AI Translator API listening on http://localhost:${config.port}`);
-    console.log(`[server] CORS origin: ${config.frontendUrl}`);
+    console.log(`🚀 [server] XLIFF AI Translator API listening on http://localhost:${config.port}`);
+    console.log(`🌐 [server] CORS origin: ${config.frontendUrl}`);
     const settings = await getPublicAppSettings();
     if (!settings.hasApiKey || !settings.provider || !settings.model) {
       console.warn(
-        '[server] AI provider is not fully configured. Save provider, model, and API key in Settings.',
+        '⚠️  [server] AI provider is not fully configured. Save provider, model, and API key in Settings.',
       );
     }
   });
 }
 
 main().catch((err) => {
-  console.error('Failed to start server:', err);
+  console.error('❌ [server] Failed to start server:', err);
   process.exit(1);
 });

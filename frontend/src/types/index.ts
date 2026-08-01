@@ -54,11 +54,12 @@ export interface ApiResponse<T> {
 
 export const TARGET_LANGUAGES = [
   { code: 'de', name: 'German', nativeName: 'Deutsch' },
-  { code: 'fr', name: 'French', nativeName: 'Français' },
+  { code: 'sl', name: 'Slovenian', nativeName: 'Slovenščina' },
+  { code: 'pl', name: 'Polish', nativeName: 'Polski' },
   { code: 'es', name: 'Spanish', nativeName: 'Español' },
-  { code: 'it', name: 'Italian', nativeName: 'Italiano' },
-  { code: 'pt', name: 'Portuguese', nativeName: 'Português' },
-  { code: 'nl', name: 'Dutch', nativeName: 'Nederlands' },
+  { code: 'fr', name: 'French', nativeName: 'Français' },
+  { code: 'zh-cn', name: 'Chinese (Simplified)', nativeName: '简体中文' },
+  { code: 'ja', name: 'Japanese', nativeName: '日本語' },
 ] as const;
 
 export type AiProvider = 'gemini' | 'anthropic';

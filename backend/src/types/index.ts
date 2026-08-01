@@ -21,11 +21,12 @@ export type XliffVersion = '1.2' | '2.0' | 'unknown';
 /** Supported target languages for translation output. */
 export const SUPPORTED_TARGET_LANGUAGES = {
   de: { code: 'de', name: 'German', nativeName: 'Deutsch' },
-  fr: { code: 'fr', name: 'French', nativeName: 'Français' },
+  sl: { code: 'sl', name: 'Slovenian', nativeName: 'Slovenščina' },
+  pl: { code: 'pl', name: 'Polish', nativeName: 'Polski' },
   es: { code: 'es', name: 'Spanish', nativeName: 'Español' },
-  it: { code: 'it', name: 'Italian', nativeName: 'Italiano' },
-  pt: { code: 'pt', name: 'Portuguese', nativeName: 'Português' },
-  nl: { code: 'nl', name: 'Dutch', nativeName: 'Nederlands' },
+  fr: { code: 'fr', name: 'French', nativeName: 'Français' },
+  'zh-cn': { code: 'zh-cn', name: 'Chinese (Simplified)', nativeName: '简体中文' },
+  ja: { code: 'ja', name: 'Japanese', nativeName: '日本語' },
 } as const;
 
 export type TargetLanguageCode = keyof typeof SUPPORTED_TARGET_LANGUAGES;
