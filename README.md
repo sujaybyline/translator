@@ -90,9 +90,9 @@ Configure the AI provider, model, and API key from the **Settings** page in the 
 **VPS storage (recommended for production):**
 
 ```env
-UPLOAD_DIR=/var/www/xliff-translator/uploads
-OUTPUT_DIR=/var/www/xliff-translator/output
-BACKUP_DIR=/var/www/xliff-translator/backup
+UPLOAD_DIR=storage/uploads
+OUTPUT_DIR=storage/output
+BACKUP_DIR=storage/backup
 ```
 
 These directories are created automatically on startup if they do not exist.
@@ -221,14 +221,14 @@ AI credentials are loaded from MySQL on every translation — no restart require
 Set in `.env`:
 
 ```env
-UPLOAD_DIR=/var/www/xliff-translator/uploads
-OUTPUT_DIR=/var/www/xliff-translator/output
-BACKUP_DIR=/var/www/xliff-translator/backup
+UPLOAD_DIR=storage/uploads
+OUTPUT_DIR=storage/output
+BACKUP_DIR=storage/backup
 ```
 
 ### Preserve data across deployments
 
-**Do not delete** `uploads/`, `output/`, or `backup/` during deploy. Only replace application code (`backend/dist`, `frontend/dist`).
+**Do not delete** `backend/storage/` during deploy. Only replace application code (`backend/dist`, `frontend/dist`).
 
 Recommended deploy steps:
 
@@ -239,13 +239,8 @@ Recommended deploy steps:
 
 ### Filesystem permissions
 
-Ensure the user running the Node process can read/write all three storage directories:
+The backend automatically creates `backend/storage/{uploads,output,backup}` on startup. Ensure the user running the Node process has read/write permissions in the `backend` folder.
 
-```bash
-mkdir -p /var/www/xliff-translator/{uploads,output,backup}
-chown -R www-data:www-data /var/www/xliff-translator/{uploads,output,backup}
-chmod 750 /var/www/xliff-translator/{uploads,output,backup}
-```
 
 ### Backup strategy
 

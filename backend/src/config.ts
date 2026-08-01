@@ -1,11 +1,18 @@
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-// config.ts lives at backend/src/ (or backend/dist/src/ if compiled)
-// so backendRoot is always one level up from __dirname
-const backendRoot = path.resolve(__dirname, '..');
+
+// Find the backend root directory (folder containing backend package.json)
+let backendRoot = __dirname;
+while (backendRoot !== path.parse(backendRoot).root) {
+  if (fs.existsSync(path.join(backendRoot, 'package.json'))) {
+    break;
+  }
+  backendRoot = path.dirname(backendRoot);
+}
 const projectRoot = path.resolve(backendRoot, '..');
 
 // Primary: backend/.env — co-located with the server, used in production
@@ -22,9 +29,9 @@ function intEnv(name: string, fallback: number): number {
 
 function resolveStoragePath(envValue: string | undefined, fallbackRelative: string): string {
   if (envValue?.trim()) {
-    return path.isAbsolute(envValue) ? envValue : path.resolve(projectRoot, envValue);
+    return path.isAbsolute(envValue) ? envValue : path.resolve(backendRoot, envValue);
   }
-  return path.resolve(projectRoot, fallbackRelative);
+  return path.resolve(backendRoot, fallbackRelative);
 }
 
 export const config = {
@@ -44,9 +51,10 @@ export const config = {
     url: process.env.DATABASE_URL ?? '',
   },
   paths: {
-    uploads: resolveStoragePath(process.env.UPLOAD_DIR, 'uploads'),
-    output: resolveStoragePath(process.env.OUTPUT_DIR, 'output'),
-    backup: resolveStoragePath(process.env.BACKUP_DIR, 'backup'),
+    uploads: resolveStoragePath(process.env.UPLOAD_DIR, 'storage/uploads'),
+    output: resolveStoragePath(process.env.OUTPUT_DIR, 'storage/output'),
+    backup: resolveStoragePath(process.env.BACKUP_DIR, 'storage/backup'),
   },
   defaultTargetLanguage: 'de' as const,
 };
+

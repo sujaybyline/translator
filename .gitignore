@@ -14,13 +14,10 @@ frontend/dist/
 backend/dist/
 *.tsbuildinfo
 
-# Uploads & outputs (keep folders)
-uploads/*
-!uploads/.gitkeep
-output/*
-!output/.gitkeep
-backup/*
-!backup/.gitkeep
+# Storage (uploads, outputs, backups inside backend/storage)
+backend/storage/*
+!backend/storage/.gitkeep
+backend/storage/**/.gitkeep
 
 # Logs & OS
 *.log
@@ -37,5 +34,4 @@ Thumbs.db
 # Coverage / test
 coverage/
 .nyc_output/
-storage
-backup
+
